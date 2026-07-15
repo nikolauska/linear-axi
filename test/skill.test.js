@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 
 import { createSkillMarkdown, extractCommandsBlock, SKILL_DESCRIPTION } from "../src/skill.js";
 
-test("skill markdown is installable and points agents at npx linear-axi", () => {
+test("skill markdown is installable and points agents at linear-axi", () => {
   const skill = createSkillMarkdown();
 
   assert.match(skill, /^---\nname: linear-axi\n/m);
   assert.match(skill, new RegExp(`description: ${JSON.stringify(SKILL_DESCRIPTION).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  assert.match(skill, /user-invocable: false/);
-  assert.match(skill, /npx -y linear-axi/);
+  assert.match(skill, /npm install -g @nikolauska\/linear-axi/);
+  assert.doesNotMatch(skill, /npx -y/);
   assert.match(skill, /auth login/);
   assert.match(skill, /linear-axi update --check/);
   assert.doesNotMatch(skill, /gh-axi/);

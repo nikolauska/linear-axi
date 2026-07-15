@@ -8,26 +8,20 @@ The project follows the [AXI](https://axi.md/) pattern: an Agent eXperience.
 
 ## Install
 
-Run the CLI without installing it globally:
+Install it as a global command:
 
 ```sh
-npx -y linear-axi --help
-```
-
-Or install it as a global command:
-
-```sh
-npm install -g linear-axi
+npm install -g @nikolauska/linear-axi
 linear-axi --help
 ```
 
 Agents that support [Agent Skills](https://agentskills.io) can also install the linear-axi skill with the [Vercel skill installer](https://github.com/vercel-labs/skills):
 
 ```sh
-npx skills add AnonymousMorris/linear-axi -g
+npx skills add nikolauska/linear-axi -g
 ```
 
-That is enough for agents that support skills. The skill teaches the agent to run `linear-axi` through `npx -y linear-axi`, so the CLI is resolved on demand. You still need access to a Linear MCP endpoint. The default endpoint uses OAuth; run `npx -y linear-axi auth login` when authorization is needed, or use the manual flow documented below for headless environments.
+That is enough for agents that support skills. Install the CLI globally as shown above before using the skill. You still need access to a Linear MCP endpoint. The default endpoint uses OAuth; run `linear-axi auth login` when authorization is needed, or use the manual flow documented below for headless environments.
 
 `-g` installs the skill globally. Drop `-g` to install it only for the current project.
 
