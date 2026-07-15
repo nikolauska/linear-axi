@@ -15,13 +15,35 @@ npm install -g @nikolauska/linear-axi
 linear-axi --help
 ```
 
+### Claude Code, Codex, and GitHub Copilot CLI plugins
+
+Add and install the marketplace plugin:
+
+```text
+# Claude Code
+/plugin marketplace add nikolauska/linear-axi
+/plugin install linear-axi@linear-axi
+
+# Codex
+codex plugin marketplace add nikolauska/linear-axi
+codex plugin add linear-axi@linear-axi
+
+# GitHub Copilot CLI
+copilot plugin marketplace add nikolauska/linear-axi
+copilot plugin install linear-axi@linear-axi
+```
+
+The plugin installs the existing Agent Skill only. It does not install the `linear-axi` executable; install the CLI globally as shown above before using it.
+
+### Portable Agent Skill
+
 Agents that support [Agent Skills](https://agentskills.io) can also install the linear-axi skill with the [Vercel skill installer](https://github.com/vercel-labs/skills):
 
 ```sh
 npx skills add nikolauska/linear-axi -g
 ```
 
-That is enough for agents that support skills. Install the CLI globally as shown above before using the skill. You still need access to a Linear MCP endpoint. The default endpoint uses OAuth; run `linear-axi auth login` when authorization is needed, or use the manual flow documented below for headless environments.
+Plugin and Agent Skill installs add agent guidance only. You still need access to a Linear MCP endpoint. The default endpoint uses OAuth; run `linear-axi auth login` when authorization is needed, or use the manual flow documented below for headless environments.
 
 `-g` installs the skill globally. Drop `-g` to install it only for the current project.
 

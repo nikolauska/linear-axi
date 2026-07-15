@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "linear-axi",
+  "description": "Agent-friendly Linear operations through compact, actionable output.",
+  "owner": {
+    "name": "Niko Lehtovirta",
+    "url": "https://github.com/nikolauska"
+  },
+  "plugins": [
+    {
+      "name": "linear-axi",
+      "description": "Operate Linear through the linear-axi CLI and Agent Skill.",
+      "source": "./",
+      "category": "Productivity",
+      "tags": ["linear", "agent-skills", "TOON"]
+    }
+  ]
+}
