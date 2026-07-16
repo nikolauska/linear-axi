@@ -8,7 +8,7 @@ description: "Operate Linear through the linear-axi CLI - issues, projects, team
 Agent ergonomic wrapper around the configured Linear MCP server. Prefer this over raw Linear MCP calls for Linear operations.
 
 Check whether `linear-axi` is installed before using it. If it is missing, ask the user to install it globally with `npm install -g @nikolauska/linear-axi`.
-linear-axi requires Node.js 20 or newer.
+linear-axi requires Node.js 24 or newer.
 
 linear-axi uses the configured Linear MCP server. The default remote endpoint uses OAuth; if authorization is required, run `linear-axi auth login`. Run `linear-axi auth logout` to clear saved OAuth credentials without changing bearer-token environment variables.
 
