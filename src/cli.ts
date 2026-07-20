@@ -105,7 +105,7 @@ function withRuntimeCleanup(handler) {
   };
 }
 
-function formatError(error) {
+export function formatError(error) {
   if (error instanceof SdkAxiError) {
     return {
       output: renderToon({
@@ -129,7 +129,7 @@ function formatError(error) {
   };
 }
 
-async function makeRuntime(context) {
+export async function makeRuntime(context) {
   const url = await resolveMcpUrl(context.env);
   return {
     cwd: context.cwd,

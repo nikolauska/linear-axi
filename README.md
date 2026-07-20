@@ -8,6 +8,24 @@ The project follows the [AXI](https://axi.md/) pattern: an Agent eXperience.
 
 ## Install
 
+### Pi extension
+
+Install the pi package to register the native `linear_axi` tool and bundled Agent Skill:
+
+```sh
+pi install npm:@nikolauska/linear-axi
+```
+
+The tool accepts a command group as `action` and the remaining CLI arguments as `args`, for example:
+
+```json
+{ "action": "issues", "args": ["list", "--assignee", "me", "--limit", "25"] }
+```
+
+Pi provides the extension runtime, so no separate global CLI install is required for the native tool.
+
+### Standalone CLI
+
 Install it as a global command:
 
 ```sh
@@ -60,7 +78,7 @@ npm install
 npm link
 ```
 
-`linear-axi` requires Node.js 24 or newer.
+`linear-axi` requires Node.js 24 or newer. To test the pi package directly from a checkout, run `pi -e .`.
 
 For global installs, run `linear-axi update --check` to see whether a newer release is available, or `linear-axi update` to upgrade.
 
@@ -190,7 +208,7 @@ help[1]: Run `--help` to see available commands
 
 ## Development
 
-`src/cli.ts` is the runtime/router layer. It delegates top-level CLI behavior to `axi-sdk-js` while keeping one Linear command registry shared by the SDK entrypoint and the testable dispatcher. Resource command handlers live in `src/commands/`, with shared command behavior in `src/commands/shared.ts` and lower-level formatting, MCP, argument, and repo-project helpers in `src/lib/`.
+`src/cli.ts` is the runtime/router layer. It delegates top-level CLI behavior to `axi-sdk-js` while keeping one Linear command registry shared by the SDK entrypoint, the native pi extension in `src/extension.ts`, and the testable dispatcher. Resource command handlers live in `src/commands/`, with shared command behavior in `src/commands/shared.ts` and lower-level formatting, MCP, argument, and repo-project helpers in `src/lib/`.
 
 ```sh
 npm run build:skill

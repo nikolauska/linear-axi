@@ -1,6 +1,6 @@
 {
   "name": "@nikolauska/linear-axi",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "AXI wrapper for the Linear MCP server",
   "keywords": [
     "agent",
@@ -8,7 +8,8 @@
     "axi",
     "cli",
     "linear",
-    "mcp"
+    "mcp",
+    "pi-package"
   ],
   "homepage": "https://github.com/nikolauska/linear-axi#readme",
   "bugs": {
@@ -53,12 +54,28 @@
     "axi-sdk-js": "^0.1.8"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.10",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
     "@types/node": "^26.1.1",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
+    "typebox": "^1.3.6",
     "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "engines": {
     "node": ">=24"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/extension.js"
+    ],
+    "skills": [
+      "./skills"
+    ]
   }
 }
