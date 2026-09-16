@@ -974,27 +974,24 @@ test("repo project default applies to issue creates but not updates", async () =
   assert.doesNotMatch(updateOutput, /help\[/);
 });
 
-test("issue create requires explicit or initialized project", async () => {
+test("issue create without explicit or initialized project omits project", async () => {
   const repo = await mkdtemp(join(tmpdir(), "linear-axi-repo-"));
   await mkdir(join(repo, ".git"));
-  let called = false;
 
-  await assert.rejects(
-    () =>
-      run(
-        ["issues", "create", "--title", "Fix auth", "--team", "ENG"],
-        runtime({
-          cwd: repo,
-          callTool: async () => {
-            called = true;
-            return {};
-          },
-        }),
-      ),
-    /No default Linear project is configured for this repository/,
+  let seen;
+  await run(
+    ["issues", "create", "--title", "Fix auth", "--team", "ENG"],
+    runtime({
+      cwd: repo,
+      callTool: async (name, args) => {
+        if (name === "list_issues") return { structuredContent: { issues: [] } };
+        seen = { name, args };
+        return { structuredContent: { identifier: "LIN-1", title: "Fix auth" } };
+      },
+    }),
   );
 
-  assert.equal(called, false);
+  assert.deepEqual(seen, { name: "save_issue", args: { title: "Fix auth", team: "ENG" } });
 });
 
 test("repo project default applies to document creates but not updates", async () => {
