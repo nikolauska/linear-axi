@@ -93,7 +93,6 @@ async function createIssueCommand(args, runtime) {
   const toolArgs = await issueToolArgs(parsed, runtime);
   await applyRepoProjectDefault(toolArgs, runtime, {
     command: "linear-axi issues create",
-    requireProject: true,
   });
   requireValue(
     toolArgs.title && toolArgs.team,
