@@ -1,126 +1,16 @@
 # AGENTS.md
 
-<!-- agents-md-version: 1 -->
+This repository builds `linear-axi`, an agent-facing CLI over Linear MCP. Work in the repository root. Source is TypeScript ESM (`src/`), command handlers are in `src/commands/`, shared command behavior in `src/commands/shared.ts`, lower-level helpers in `src/lib/`, and tests in `test/`.
 
-## CRITICAL
+## Working on the CLI
 
-- MUST: Use `npm ci` for a clean install; `package-lock.json` mandates npm.
-- MUST: Run `npm run check` before committing.
-- MUST: Run `npm test` before opening a PR.
-- MUST: Use `npm install` or `npm uninstall` to change dependencies; commit both package files.
-- NEVER: Use yarn, pnpm, or bun in this repository.
-- NEVER: Edit `skills/linear-axi/SKILL.md` directly; run `npm run build:skill` after changing `src/skill.ts`.
-- NEVER: Run `npm publish` locally; tagged GitHub Actions releases publish the package.
-- NEVER: Run `npm run demo` without approval; it creates Linear projects, issues, and comments.
-- NEVER: Inspect or log bearer-token values or OAuth credential files.
-- NEVER: Force push (`git push --force`, `git push -f`) to shared branches.
-- ON FAIL: Read the first complete error before retrying; verify Node.js 24+ and the command recovery below.
-- ON FAIL (check): Run the reported syntax check, skill build, or test target directly, fix it, then rerun `npm run check`.
-- ON FAIL (test): Run `node --test test/cli.test.ts` or the relevant single test file.
+- Use Node.js 24+ and npm. Install from the lockfile with `npm ci`; change dependencies with `npm install` or `npm uninstall` and include both `package.json` and `package-lock.json`. Do not use yarn, pnpm, or bun here.
+- Follow existing ESM and async/await patterns. Keep TypeScript filenames kebab-case and tests as `*.test.ts`. Route user-facing failures through `usage` or `normalizeError`; render structured output with `renderToon`.
+- `src/skill.ts` is the source of the shipped skill. After changing it, run `npm run build:skill` and include the regenerated `skills/linear-axi/SKILL.md`; do not edit the generated file directly.
+- Finish requested changes end to end. Exercise the affected behavior with the smallest relevant local check, fix failures caused by the change, and rerun that check. For a focused test use `node --test test/<name>.test.ts`; `npm test` runs all tests. Run `npm run check` before committing and `npm test` before opening a PR. `npm run check` includes formatting, lint, typecheck, generated-skill consistency, and tests. If it fails, address the first reported failure and rerun it.
 
-## Domain & Context
+## State and external effects
 
-- Goal: Provide an agent-friendly CLI over Linear MCP operations with compact, actionable output.
-- Type: CLI/Tool
-- Stack: TypeScript ESM using `axi-sdk-js` and `@modelcontextprotocol/sdk`.
-- License: MIT
-- Key Terms:
-  - `AXI`: Agent eXperience Interface; CLI behavior optimized for software agents.
-  - `TOON`: Compact structured output rendered by `src/format.ts`.
-  - Repo project: Linear project binding stored in `.linear-project` at the Git root.
-
-## Data & State
-
-- Repo binding: `.linear-project`, written by `linear-axi init`.
-- MCP endpoint: `[mcp_servers.linear].url` in the Codex config, overridden by `LINEAR_AXI_MCP_URL`.
-- OAuth state: `LINEAR_AXI_AUTH_FILE` or the user configuration directory; never inspect its contents.
-- Generated skill: `src/skill.ts` -> `skills/linear-axi/SKILL.md` via `npm run build:skill`.
-
-## Execution Context
-
-- Run on: Host
-- Runtime: Node.js 24 or newer.
-- External service: Configured Linear MCP endpoint.
-
-## Commands
-
-```bash
-# install
-npm ci                              # ON FAIL: verify Node.js 24+ and package-lock.json consistency
-# test
-npm test                            # ON FAIL: run node --test test/cli.test.ts first
-# test:single
-node --test test/cli.test.ts        # ON FAIL: inspect the first failing assertion and rerun this file
-# check
-npm run check                       # ON FAIL: fix the first syntax, generated-skill, or test failure
-# build
-npm run build                       # ON FAIL: fix the first TypeScript compiler error
-# generate skill
-npm run build:skill                 # ON FAIL: fix src/skill.ts, then rerun
-# demo (requires approval, vhs, zsh, and Linear auth)
-npm run demo                        # ON FAIL: cancel leftover demo resources, then verify vhs and zsh
-```
-
-## Structure
-
-```
-bin/                    # Local demo wrapper for the compiled entrypoint
-docs/demo.tape          # Demo recording source
-docs/demo.gif           # Generated demo (generated -- do not edit)
-scripts/                # Skill generation script
-skills/linear-axi/      # Generated agent skill (generated -- do not edit)
-src/bin.ts              # Compiled executable entrypoint
-src/cli.ts              # Runtime and router
-src/commands/           # Resource command handlers
-src/lib/                # Shared CLI helpers
-test/                   # Node test suites
-package.json            # Scripts and package metadata
-```
-
-## Patterns
-
-- **Module:** Use ESM `import`/`export`; never add CommonJS `require()` to source files.
-- **Async:** Use `async`/`await` for asynchronous work.
-- **Naming:** Use kebab-case TypeScript filenames, camelCase functions, and UPPER_SNAKE_CASE constants. Tests use `*.test.ts`.
-- **Commands:** Keep resource routing in `src/commands/`; shared command behavior belongs in `src/commands/shared.ts`, lower-level helpers in `src/lib/`.
-- **Errors:** Route user-facing failures through `usage` or `normalizeError`; render structured output with `renderToon`.
-- **Skill:** Change shared skill content in `src/skill.ts`, then regenerate the committed skill.
-
-## Testing Strategy
-
-- Runner: Node.js built-in `node:test` via `npm test`.
-- Location: `test/*.test.ts`; keep test doubles and helpers local to the relevant file.
-- Coverage: No configured threshold.
-- Conventions: Test command output and exit behavior through the exported dispatcher or CLI runtime.
-
-## Security
-
-- Never log `LINEAR_AXI_MCP_TOKEN` or `LINEAR_MCP_TOKEN` values.
-- Never read OAuth state from `LINEAR_AXI_AUTH_FILE` or the default user configuration directory.
-- GitHub Actions publishes with OIDC on version tags; do not add registry tokens to the repository.
-
-## Env
-
-- Node.js: `>=24` from `package.json`; CI uses Node.js 24.
-- Optional configuration: `CODEX_CONFIG`, `LINEAR_AXI_AUTH_FILE`, `LINEAR_AXI_MCP_TOKEN`, `LINEAR_AXI_MCP_URL`, `LINEAR_MCP_TOKEN`.
-- Local install: `npm ci`.
-
-## Git
-
-- Branch: `main` is the default; no repository-enforced naming convention.
-- Commit: Use the observed conventional prefix and imperative subject, such as `feat: add command` or `fix(cli): handle error`.
-- Hooks: None configured; run `npm run check` manually before committing.
-- PR: Run `npm run check`; include regenerated `skills/linear-axi/SKILL.md` when `src/skill.ts` changes.
-
-## CI
-
-- Pushes: `.github/workflows/ci.yml` installs with `npm ci`, runs `npm run check`, and smoke-tests the packed CLI on Node.js 24.
-- Tags: The release job publishes to npm and creates a GitHub release after tests pass.
-
-## Tool Preferences
-
-| Task         | Prefer       | Avoid           |
-| ------------ | ------------ | --------------- |
-| Search text  | `rg`         | `grep`          |
-| List files   | `rg --files` | `find`          |
-| Dependencies | `npm`        | yarn, pnpm, bun |
+- `linear-axi init` writes a `.linear-project` binding at the Git root. The CLI uses a configured Linear MCP endpoint; `LINEAR_AXI_MCP_URL` can override it. Do not inspect or log bearer-token values or OAuth credential files, including `LINEAR_AXI_AUTH_FILE` and the default user configuration directory.
+- Local tests are the normal verification path. `npm run demo` is different: it creates Linear projects, issues, and comments. Get approval before running it or other commands that mutate Linear data.
+- Do not run `npm publish` locally; tagged GitHub Actions releases publish the package. Do not force-push shared branches.
