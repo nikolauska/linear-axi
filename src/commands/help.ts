@@ -1,10 +1,23 @@
-import { fieldHint } from "../lib/linear-format.ts";
-import { DEFAULT_LIMIT, PROJECT_SCOPED_LIST_ALIASES } from "./shared.ts";
+// One command list feeds top help, the dashboard hint, and the generated skill so they cannot drift.
+export const COMMAND_NAMES = [
+  "init",
+  "auth",
+  "issues",
+  "projects",
+  "teams",
+  "users",
+  "comments",
+  "documents",
+  "milestones",
+  "cycles",
+  "statuses",
+  "labels",
+];
 
 export function topHelp() {
   return `usage: linear-axi [command] [args] [flags]
-commands[12]:
-  (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels
+commands[${COMMAND_NAMES.length + 1}]:
+  (none)=dashboard, ${COMMAND_NAMES.join(", ")}
 flags[3]:
   --help, -h, -v/-V/--version
 examples:
@@ -46,7 +59,6 @@ export function groupHelp(name, subcommands) {
       "linear-axi projects list --limit 25",
       'linear-axi projects create --name "Roadmap" --team ENG',
       'linear-axi projects update --id <id> --summary "Updated scope"',
-      'linear-axi issues create --title "Task" --team ENG --project "Roadmap"',
     ],
     documents: [
       "linear-axi documents list --all-projects --limit 25",
@@ -65,72 +77,29 @@ export function groupHelp(name, subcommands) {
       "linear-axi auth logout",
     ],
     milestones: [
-      'linear-axi milestones list --project "Roadmap"',
-      'linear-axi milestones view --project "Roadmap" "Beta"',
-      'linear-axi milestones create --project "Roadmap" --name "Beta"',
-      'linear-axi milestones update --project "Roadmap" --id <id> --targetDate <yyyy-mm-dd>',
+      "linear-axi milestones list",
+      'linear-axi milestones view "Beta"',
+      'linear-axi milestones create --name "Beta" --targetDate 2026-12-01',
+      "linear-axi milestones update --id <id> --targetDate 2026-12-15",
     ],
     cycles: ["linear-axi cycles list --team ENG --type current"],
     statuses: ["linear-axi statuses list --team ENG"],
   };
-  const flags = groupFlagHelp(name);
+  const flags = GROUP_FLAG_HELP[name]?.join("\n") ?? "";
   return `usage: linear-axi ${name} <subcommand> [flags]
 subcommands[${subcommands.length}]:
   ${subcommands.join(", ")}
 ${flags ? `${flags}\n` : ""}examples:
 ${(examples[name] ?? [`linear-axi ${name} list`]).map((example) => `  ${example}`).join("\n")}
+detail: run \`linear-axi ${name} <subcommand> --help\` for every flag
 `;
-}
-
-export function listAliasHelp(alias) {
-  const projectScopedList = PROJECT_SCOPED_LIST_ALIASES.includes(alias);
-  const projectScopeHelp = projectScopedList
-    ? `  --all-projects
-`
-    : "";
-  const projectScopeNote = projectScopedList
-    ? `notes:
-  issues and documents require a valid repo default project from .linear-project, --project, or --all-projects.
-`
-    : "";
-  return `usage: linear-axi ${alias} list [filters] [--full]
-flags:
-  --limit <n> default ${DEFAULT_LIMIT}
-  --cursor <cursor>
-  --query <text>
-  --name <name>
-  --team <name-or-id>
-  --teamId <team-id>
-  --state <name-or-type>
-  --assignee <user>
-  --delegate <user>
-  --member <user>
-  --project <project>
-${projectScopeHelp}  --cycle <cycle>
-  --label <label>
-  --parentId <issue-id>
-  --priority <number>
-  --createdAt <filter>
-  --updatedAt <filter>
-  --orderBy createdAt|updatedAt
-  --includeArchived
-  --includeMembers
-  --includeMilestones
-  --includeStages
-  --includeTeams
-  --fields <comma-separated-fields>
-  --full
-examples:
-  linear-axi ${alias} list ${projectScopedList ? "--all-projects " : ""}--limit 25
-  linear-axi ${alias} list --fields ${fieldHint(alias)}
-  linear-axi ${alias} list --query "auth" --full
-${projectScopeNote}`;
 }
 
 export function commentListHelp() {
   return `usage: linear-axi comments list --issue <id> [--full]
 flags:
-  --limit <n> default ${DEFAULT_LIMIT}
+  --issue <id>  required
+  --limit <n> default 50
   --cursor <cursor>
   --orderBy createdAt|updatedAt
   --full
@@ -142,12 +111,17 @@ examples:
 
 export function commentCreateHelp() {
   return `usage: linear-axi comments create --issue <id> (--body <text> | --body-file <path>)
+flags:
+  --issue <id>  required
+  --body <markdown>
+  --body-file <path>  UTF-8 file; use instead of --body for multi-line text
 examples:
   linear-axi comments create --issue LIN-123 --body "Ready for review."
+  linear-axi comments create --issue LIN-123 --body-file note.md
 `;
 }
 
-const DOCUMENT_MUTATION_FIELDS_HELP = `  --title <title>
+const DOCUMENT_FIELDS_HELP = `  --title <title>
   --team <team>
   --project <project>
   --issue <issue>
@@ -156,13 +130,14 @@ const DOCUMENT_MUTATION_FIELDS_HELP = `  --title <title>
   --color <color>
   --icon <icon>
   --content <markdown>
-  --content-file <path>
+  --content-file <path>  use instead of --content
 `;
 
 export function documentCreateHelp() {
   return `usage: linear-axi documents create --title <title> [parent] [--content <markdown> | --content-file <path>]
+description: Without --team, --issue, --initiative, or --cycle the repo default project is used.
 flags:
-${DOCUMENT_MUTATION_FIELDS_HELP}examples:
+${DOCUMENT_FIELDS_HELP}examples:
   linear-axi documents create --title "Spec" --team ENG --content-file spec.md
 `;
 }
@@ -170,8 +145,8 @@ ${DOCUMENT_MUTATION_FIELDS_HELP}examples:
 export function documentUpdateHelp() {
   return `usage: linear-axi documents update --id <id> [fields]
 flags:
-  --id <id>
-${DOCUMENT_MUTATION_FIELDS_HELP}examples:
+  --id <id>  required
+${DOCUMENT_FIELDS_HELP}examples:
   linear-axi documents update --id <id> --content "Updated"
 `;
 }
@@ -184,13 +159,12 @@ examples:
 `;
 }
 
-const PROJECT_MUTATION_FIELDS_HELP = `  --name <name>
+const PROJECT_FIELDS_HELP = `  --name <name>
   --team <team>
   --teamId <team-id>
   --summary <text>
   --description <markdown>
-  --state <state>
-  --status <status>
+  --state <status>  project status name, type, or id
   --lead <user>
   --startDate <yyyy-mm-dd>
   --targetDate <yyyy-mm-dd>
@@ -198,8 +172,10 @@ const PROJECT_MUTATION_FIELDS_HELP = `  --name <name>
 
 export function projectCreateHelp() {
   return `usage: linear-axi projects create --name <name> --team <team> [fields]
+description: If a project with the same name already exists for the team, it is returned with existing: true.
 flags:
-${PROJECT_MUTATION_FIELDS_HELP}examples:
+${PROJECT_FIELDS_HELP}  --allow-duplicate  create a new project even when one with the same name exists
+examples:
   linear-axi projects create --name "Roadmap" --team ENG
 `;
 }
@@ -207,8 +183,8 @@ ${PROJECT_MUTATION_FIELDS_HELP}examples:
 export function projectUpdateHelp() {
   return `usage: linear-axi projects update --id <id> [fields]
 flags:
-  --id <id>
-${PROJECT_MUTATION_FIELDS_HELP}examples:
+  --id <id>  required
+${PROJECT_FIELDS_HELP}examples:
   linear-axi projects update --id <id> --summary "Updated scope"
 `;
 }
@@ -225,9 +201,10 @@ examples:
 }
 
 export function milestoneViewHelp() {
-  return `usage: linear-axi milestones view [--project <project>] <milestone>
+  return `usage: linear-axi milestones view [--project <project>] <milestone> [--full]
 flags:
   --project <project>  overrides the repo default project
+  --full
 examples:
   linear-axi milestones view "Beta"
   linear-axi milestones view --project "Roadmap" "Beta"
@@ -237,7 +214,7 @@ examples:
 export function milestoneCreateHelp() {
   return `usage: linear-axi milestones create [--project <project>] --name <name>
 flags:
-  --name <name>
+  --name <name>  required
   --project <project>  overrides the repo default project
   --description <markdown>
   --targetDate <yyyy-mm-dd>
@@ -248,24 +225,25 @@ examples:
 }
 
 export function milestoneUpdateHelp() {
-  return `usage: linear-axi milestones update --project <project> --id <id> [fields]
+  return `usage: linear-axi milestones update [--project <project>] --id <id> [fields]
 flags:
-  --id <id>
-  --name <name>
+  --id <id>  required
   --project <project>  overrides the repo default project
+  --name <name>
   --description <markdown>
   --targetDate <yyyy-mm-dd>
 examples:
-  linear-axi milestones update --project "Roadmap" --id <id> --targetDate <yyyy-mm-dd>
+  linear-axi milestones update --id <id> --targetDate 2026-12-15
+  linear-axi milestones update --project "Roadmap" --id <id> --name "Beta 2"
 `;
 }
 
 export function cycleListHelp() {
   return `usage: linear-axi cycles list --team <team> [--type current|previous|next|all] [--full]
 flags:
-  --team <team>
+  --team <team>  team key, name, or id
   --teamId <team-id>
-  --type current|previous|next|all
+  --type current|previous|next|all  default all
   --full
 examples:
   linear-axi cycles list --team ENG --type current
@@ -275,18 +253,8 @@ examples:
 export function statusListHelp() {
   return `usage: linear-axi statuses list --team <team> [--full]
 flags:
-  --team <team>
+  --team <team>  team key, name, or id
   --teamId <team-id>
-  --type <type>
-  --project <project>
-  --initiative <initiative>
-  --user <user>
-  --limit <n>
-  --cursor <cursor>
-  --orderBy createdAt|updatedAt
-  --createdAt <filter>
-  --updatedAt <filter>
-  --includeArchived
   --full
 examples:
   linear-axi statuses list --team ENG
@@ -302,52 +270,47 @@ examples:
 `;
 }
 
-export function issueCreateHelp() {
-  return `usage: linear-axi issues create --title <title> --team <team> [fields]
-flags:
-  --title <title>
+const ISSUE_FIELDS_HELP = `  --title <title>
   --team <team>
   --state <state>
   --assignee <user>
   --project <project>
   --cycle <cycle>
   --parentId <issue-id>
-  --label <label> repeatable
-  --priority <number>
+  --priority <0-4>  0 none, 1 urgent, 2 high, 3 medium, 4 low
   --estimate <number>
   --dueDate <yyyy-mm-dd>
   --description <markdown>
-  --description-file <path>
+  --description-file <path>  use instead of --description
+`;
+
+export function issueCreateHelp() {
+  return `usage: linear-axi issues create --title <title> --team <team> [fields]
+description: Uses the repo default project unless --project is given. If an issue with the same title already exists for the team, it is returned with existing: true.
+flags:
+${ISSUE_FIELDS_HELP}  --label <label>  repeatable
+  --allow-duplicate  create a new issue even when one with the same title exists
 examples:
   linear-axi issues create --title "Fix auth" --team ENG
-  linear-axi issues create --title "Task" --team ENG --project "Roadmap"
+  linear-axi issues create --title "Task" --team ENG --project "Roadmap" --label Bug
 `;
 }
 
 export function issueUpdateHelp() {
   return `usage: linear-axi issues update --id <id> [fields]
 flags:
-  --id <id>
-  --title <title>
-  --team <team>
-  --state <state>
-  --assignee <user>
-  --project <project>
-  --cycle <cycle>
-  --parentId <issue-id>
-  --label <label> repeatable
-  --priority <number>
-  --estimate <number>
-  --dueDate <yyyy-mm-dd>
-  --description <markdown>
-  --description-file <path>
+  --id <id>  required
+${ISSUE_FIELDS_HELP}  --label <label>  add a label; repeatable
+  --remove-label <label>  remove a label; repeatable
 examples:
   linear-axi issues update --id LIN-123 --state Done
+  linear-axi issues update --id LIN-123 --label Bug --remove-label Triage
 `;
 }
 
 export function authLoginHelp() {
   return `usage: linear-axi auth login [--manual] [--timeout <ms>]
+description: Waits for the browser callback; the authorization URL is printed on stderr.
 flags:
   --manual print the authorization URL and exit so you can paste the code into auth finish
   --timeout <ms> default 300000
@@ -366,7 +329,7 @@ examples:
 
 export function authLogoutHelp() {
   return `usage: linear-axi auth logout
-description: Remove saved Linear MCP OAuth credentials without changing bearer-token environment variables.
+description: Remove saved Linear MCP OAuth credentials for the configured endpoint without changing bearer-token environment variables.
 examples:
   linear-axi auth logout
 `;
@@ -376,13 +339,13 @@ const GROUP_FLAG_HELP = {
   issues: [
     "flags{list}:\n  --assignee <user>, --state <state>, --team <team>, --project <project>, --all-projects, --query <text>, --label <label>, --limit <n> (default 50), --fields <a,b,c>, --full",
     "flags{view}:\n  --full (show complete description without truncation)",
-    "flags{create}:\n  --title <text> (required), --team <team> (required), --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>",
-    "flags{update}:\n  --id <id> (required), --title <text>, --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>",
+    "flags{create}:\n  --title <text> (required), --team <team> (required), --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>, --priority <0-4>, --allow-duplicate",
+    "flags{update}:\n  --id <id> (required), --title <text>, --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>, --remove-label <label>, --priority <0-4>",
   ],
   projects: [
     "flags{list}:\n  --query <text>, --team <team>, --state <state>, --limit <n> (default 50), --fields <a,b,c>, --full",
-    "flags{create}:\n  --name <text> (required), --team <team> or --teamId <id> (required), --summary <text>, --description <markdown>, --status <status>, --lead <user>",
-    "flags{update}:\n  --id <id> (required), --name <text>, --team <team> or --teamId <id>, --summary <text>, --description <markdown>, --status <status>, --lead <user>",
+    "flags{create}:\n  --name <text> (required), --team <team> or --teamId <id> (required), --summary <text>, --description <markdown>, --state <status>, --lead <user>, --allow-duplicate",
+    "flags{update}:\n  --id <id> (required), --name <text>, --team <team> or --teamId <id>, --summary <text>, --description <markdown>, --state <status>, --lead <user>",
   ],
   documents: [
     "flags{list}:\n  --project <project>, --all-projects, --query <text>, --team <team>, --limit <n> (default 50), --fields <a,b,c>, --full",
@@ -395,7 +358,3 @@ const GROUP_FLAG_HELP = {
     "flags{create}:\n  --issue <id> (required), --body <text> or --body-file <path> (required)",
   ],
 };
-
-function groupFlagHelp(name) {
-  return GROUP_FLAG_HELP[name]?.join("\n") ?? "";
-}

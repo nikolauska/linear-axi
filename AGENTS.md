@@ -12,5 +12,5 @@ This repository builds `linear-axi`, an agent-facing CLI over Linear MCP. Work i
 ## State and external effects
 
 - `linear-axi init` writes a `.linear-project` binding at the Git root. The CLI uses a configured Linear MCP endpoint; `LINEAR_AXI_MCP_URL` can override it. Do not inspect or log bearer-token values or OAuth credential files, including `LINEAR_AXI_AUTH_FILE` and the default user configuration directory.
-- Local tests are the normal verification path. `npm run demo` is different: it creates Linear projects, issues, and comments. Get approval before running it or other commands that mutate Linear data.
+- Local tests are the normal verification path. Get approval before running commands that mutate Linear data.
 - Do not run `npm publish` locally; tagged GitHub Actions releases publish the package. Do not force-push shared branches.

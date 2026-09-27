@@ -1,11 +1,31 @@
 import { asArray } from "./mcp-tools.ts";
 
+// Preview limits balance tokens against follow-up calls: `--full` returns Linear's whole raw
+// record, so text an agent almost always needs to read (issue descriptions, comment threads)
+// gets a generous limit, while echoes of text the agent just wrote stay short.
+export const COMMENT_LIST_PREVIEW = 1000;
+export const COMMENT_ECHO_PREVIEW = 120;
+const ISSUE_DESCRIPTION_PREVIEW = 4000;
+
 const FIELD_HINTS = {
   issues: "id,title,state,assignee",
   documents: "id,title,updatedAt",
   projects: "id,name,status",
-  teams: "id,name,key",
+  teams: "id,name",
   users: "id,name,email",
+  labels: "id,name",
+};
+
+// Each list keeps the fields an agent needs to pick the next command; a shared id/name/state
+// shape produced empty columns for teams and statuses and presence text for users.
+const ROW_FIELDS = {
+  documents: ["id", "title", "updatedAt"],
+  teams: ["id", "name"],
+  users: ["id", "name", "email"],
+  labels: ["id", "name"],
+  statuses: ["id", "name", "type"],
+  cycles: ["id", "number", "name", "startsAt", "endsAt"],
+  milestones: ["id", "name", "targetDate"],
 };
 
 const STATUS_RANKS = {
@@ -20,11 +40,7 @@ const STATUS_RANKS = {
 export function compactRows(alias, data) {
   if (alias === "issues") return compactIssues(data);
   if (alias === "projects") return compactProjects(data);
-  return asArray(data).map((item) => ({
-    id: item.id ?? item.identifier ?? item.key ?? item.slug ?? item.name ?? "",
-    name: item.name ?? item.title ?? item.displayName ?? item.email ?? "",
-    state: rowState(item),
-  }));
+  return selectFields(asArray(data), ROW_FIELDS[alias] ?? ["id", "name"]);
 }
 
 export function parseFields(fields) {
@@ -35,7 +51,7 @@ export function parseFields(fields) {
 }
 
 export function fieldHint(publicName) {
-  return FIELD_HINTS[publicName] ?? "id,name,state";
+  return FIELD_HINTS[publicName] ?? "id,name";
 }
 
 export function selectFields(items, fields) {
@@ -46,6 +62,11 @@ export function selectFields(items, fields) {
     }
     return selected;
   });
+}
+
+export function missingFields(items, fields) {
+  if (items.length === 0) return [];
+  return fields.filter((field) => items.every((item) => rawFieldValue(item, field) === undefined));
 }
 
 export function paginationInfo(data, rowCount) {
@@ -63,8 +84,8 @@ export function paginationInfo(data, rowCount) {
   };
 }
 
-export function compactComment(comment) {
-  const body = formattedPreview(comment.body ?? "", 120);
+export function compactComment(comment, limit) {
+  const body = formattedPreview(comment.body ?? "", limit);
   return {
     id: comment.id ?? "",
     author: comment.user?.name ?? comment.author?.name ?? "",
@@ -97,39 +118,52 @@ function compactProjects(data) {
 
 export function compactIssueDetail(issue) {
   const description = String(issue.description ?? issue.body ?? "");
-  const preview = formattedPreview(description, 1000);
+  const preview = formattedPreview(description, ISSUE_DESCRIPTION_PREVIEW);
   return {
     truncated: preview.truncated,
     issue: {
       id: issue.identifier ?? issue.id ?? "",
       title: issue.title ?? "",
       state: issueState(issue),
+      priority: priorityName(issue.priority),
       assignee: personName(issue.assignee),
+      team: namedValue(issue.team),
+      project: namedValue(issue.project),
+      labels: labelNames(issue.labels),
       description: preview.text,
       url: issue.url ?? "",
     },
   };
 }
 
+// Mutation results echo the fields a caller can set so the agent can confirm the change landed.
 export function compactIssueMutation(issue) {
-  return {
+  return withoutEmpty({
     id: issue.identifier ?? issue.id ?? "",
     title: issue.title ?? "",
     state: issueState(issue),
+    priority: priorityName(issue.priority),
+    assignee: personName(issue.assignee),
     project: namedValue(issue.project),
     team: namedValue(issue.team),
+    labels: labelNames(issue.labels),
+    dueDate: issue.dueDate ?? "",
+    estimate: issue.estimate?.value ?? issue.estimate ?? "",
     url: issue.url ?? "",
-  };
+  });
 }
 
 export function compactProjectMutation(project) {
-  return {
+  return withoutEmpty({
     id: project.id ?? "",
     name: project.name ?? "",
     status: projectStatus(project),
+    lead: personName(project.lead),
     team: project.team?.name ?? project.teams?.[0]?.name ?? project.team ?? "",
+    startDate: project.startDate ?? "",
+    targetDate: project.targetDate ?? "",
     url: project.url ?? "",
-  };
+  });
 }
 
 export function compactDocumentMutation(document) {
@@ -158,6 +192,20 @@ export function compactDocumentDetail(document, id) {
   };
 }
 
+export function compactMilestone(milestone) {
+  const preview = formattedPreview(String(milestone.description ?? ""), 500);
+  return {
+    truncated: preview.truncated,
+    milestone: withoutEmpty({
+      id: milestone.id ?? "",
+      name: milestone.name ?? "",
+      targetDate: milestone.targetDate ?? "",
+      project: namedValue(milestone.project),
+      description: preview.text,
+    }),
+  };
+}
+
 export function sanitizeDocument(document, id) {
   if (!document || typeof document !== "object") return document;
   return {
@@ -169,14 +217,28 @@ export function sanitizeDocument(document, id) {
   };
 }
 
+function rawFieldValue(item, field) {
+  return field.split(".").reduce((current, part) => current?.[part], item);
+}
+
 function fieldValue(item, field) {
-  const value = field.split(".").reduce((current, part) => current?.[part], item);
+  const value = rawFieldValue(item, field);
   if (value === undefined) return "";
   if (value === null) return null;
   if (typeof value === "object") {
     return value.name ?? value.displayName ?? value.identifier ?? value.id ?? JSON.stringify(value);
   }
   return value;
+}
+
+function withoutEmpty(record) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([key, value]) =>
+      ["id", "title", "name"].includes(key)
+        ? true
+        : value !== "" && !(Array.isArray(value) && value.length === 0),
+    ),
+  );
 }
 
 function rowState(item) {
@@ -189,6 +251,16 @@ function issueState(issue) {
 
 function projectStatus(project) {
   return project.status?.name ?? project.state?.name ?? project.status ?? project.state ?? "";
+}
+
+function priorityName(priority) {
+  if (priority === undefined || priority === null) return "";
+  return priority?.name ?? priority;
+}
+
+function labelNames(labels) {
+  const list = Array.isArray(labels) ? labels : (labels?.nodes ?? []);
+  return list.map((label) => label?.name ?? label);
 }
 
 function personName(person) {

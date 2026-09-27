@@ -24,7 +24,6 @@
     "linear-axi": "dist/bin.js"
   },
   "files": [
-    "docs/demo.webm",
     "skills",
     "dist",
     "LICENSE",
@@ -38,7 +37,6 @@
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc",
     "build:skill": "node scripts/build-skill.ts",
-    "demo": "npm run build && PATH=\"$PWD/bin:$PATH\" vhs docs/demo.tape",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint",
@@ -51,6 +49,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@toon-format/toon": "^2.3.1",
     "axi-sdk-js": "^0.1.11"
   },
   "devDependencies": {

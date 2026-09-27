@@ -12,24 +12,33 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import { DEFAULT_MCP_URL } from "./config.ts";
 import type { InputRecord, McpResult, McpTool } from "./types.ts";
 
 interface ClientOptions {
   url: string;
+  version: string;
   token?: string;
   fetchImpl?: typeof fetch;
   authStorePath?: string;
 }
 
-interface OAuthStore {
+interface ServerAuth {
   state?: string;
   clientInformation?: OAuthClientInformationMixed;
   tokens?: OAuthTokens;
   codeVerifier?: string;
 }
 
+// Credentials are keyed by MCP server URL so a token issued for Linear is never sent to a
+// different endpoint configured through LINEAR_AXI_MCP_URL or Codex config.
+interface OAuthStore extends ServerAuth {
+  servers?: Record<string, ServerAuth>;
+}
+
 export class LinearMcpClient {
   url: string;
+  version: string;
   token?: string;
   fetchImpl?: typeof fetch;
   authStorePath?: string;
@@ -37,12 +46,15 @@ export class LinearMcpClient {
   client: Client | null = null;
   transport: StreamableHTTPClientTransport | null = null;
 
-  constructor({ url, token, fetchImpl, authStorePath }: ClientOptions) {
+  constructor({ url, version, token, fetchImpl, authStorePath }: ClientOptions) {
     this.url = url;
+    this.version = version;
     this.token = token;
     this.fetchImpl = fetchImpl;
     this.authStorePath = authStorePath;
-    this.authProvider = token ? null : new LinearOAuthProvider({ storePath: authStorePath });
+    this.authProvider = token
+      ? null
+      : new LinearOAuthProvider({ storePath: authStorePath, serverUrl: url });
   }
 
   async connect(): Promise<void> {
@@ -51,7 +63,7 @@ export class LinearMcpClient {
       authProvider: this.authProvider ?? undefined,
       fetch: this.fetchImpl,
     });
-    this.client = new Client({ name: "linear-axi", version: "0.1.0" });
+    this.client = new Client({ name: "linear-axi", version: this.version });
     try {
       await this.client.connect(this.transport);
     } catch (error) {
@@ -84,7 +96,8 @@ export class LinearMcpClient {
 
   async logoutAuth(): Promise<{ removed: boolean; tokenConfigured: boolean }> {
     const provider =
-      this.authProvider ?? new LinearOAuthProvider({ storePath: this.authStorePath });
+      this.authProvider ??
+      new LinearOAuthProvider({ storePath: this.authStorePath, serverUrl: this.url });
     return { removed: await provider.deleteStore(), tokenConfigured: Boolean(this.token) };
   }
 
@@ -99,10 +112,12 @@ export class LinearMcpClient {
 
 export class LinearOAuthProvider implements OAuthClientProvider {
   storePath: string;
+  serverUrl: string;
   authorizationUrl: string | null = null;
 
-  constructor({ storePath }: { storePath?: string } = {}) {
+  constructor({ storePath, serverUrl }: { storePath?: string; serverUrl?: string } = {}) {
     this.storePath = storePath ?? defaultAuthStorePath();
+    this.serverUrl = serverUrl ?? DEFAULT_MCP_URL;
   }
 
   get redirectUrl(): string {
@@ -120,27 +135,27 @@ export class LinearOAuthProvider implements OAuthClientProvider {
   }
 
   async state(): Promise<string> {
-    const store = await this.readStore();
-    if (store.state) return store.state;
+    const auth = await this.readServerAuth();
+    if (auth.state) return auth.state;
     const state = randomBytes(24).toString("base64url");
-    await this.updateStore({ state });
+    await this.updateServerAuth({ state });
     return state;
   }
 
   async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
-    return (await this.readStore()).clientInformation;
+    return (await this.readServerAuth()).clientInformation;
   }
 
   async saveClientInformation(value: OAuthClientInformationMixed): Promise<void> {
-    await this.updateStore({ clientInformation: value });
+    await this.updateServerAuth({ clientInformation: value });
   }
 
   async tokens(): Promise<OAuthTokens | undefined> {
-    return (await this.readStore()).tokens;
+    return (await this.readServerAuth()).tokens;
   }
 
   async saveTokens(value: OAuthTokens): Promise<void> {
-    await this.updateStore({ tokens: value });
+    await this.updateServerAuth({ tokens: value });
   }
 
   async redirectToAuthorization(url: URL): Promise<void> {
@@ -148,34 +163,56 @@ export class LinearOAuthProvider implements OAuthClientProvider {
   }
 
   async saveCodeVerifier(value: string): Promise<void> {
-    await this.updateStore({ codeVerifier: value });
+    await this.updateServerAuth({ codeVerifier: value });
   }
 
   async codeVerifier(): Promise<string> {
-    const value = (await this.readStore()).codeVerifier;
+    const value = (await this.readServerAuth()).codeVerifier;
     if (!value) throw new Error("No OAuth code verifier saved");
     return value;
   }
 
   async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier"): Promise<void> {
-    const store = await this.readStore();
-    if (scope === "all" || scope === "client") delete store.clientInformation;
-    if (scope === "all" || scope === "tokens") delete store.tokens;
+    const auth = await this.readServerAuth();
+    if (scope === "all" || scope === "client") delete auth.clientInformation;
+    if (scope === "all" || scope === "tokens") delete auth.tokens;
     if (scope === "all" || scope === "verifier") {
-      delete store.codeVerifier;
-      delete store.state;
+      delete auth.codeVerifier;
+      delete auth.state;
     }
-    await this.writeStore(store);
+    await this.writeServerAuth(auth);
   }
 
+  // Removes only this server's credentials; the file goes away once no server entries remain.
   async deleteStore(): Promise<boolean> {
+    const servers = serverEntries(await this.readStore());
+    const removed = Object.keys(servers[this.serverUrl] ?? {}).length > 0;
+    delete servers[this.serverUrl];
+    if (Object.keys(servers).length > 0) {
+      await this.writeStore({ servers });
+      return removed;
+    }
     try {
       await rm(this.storePath);
-      return true;
+      return removed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
+  }
+
+  async readServerAuth(): Promise<ServerAuth> {
+    return { ...serverEntries(await this.readStore())[this.serverUrl] };
+  }
+
+  async updateServerAuth(patch: ServerAuth): Promise<void> {
+    await this.writeServerAuth({ ...(await this.readServerAuth()), ...patch });
+  }
+
+  async writeServerAuth(auth: ServerAuth): Promise<void> {
+    const servers = serverEntries(await this.readStore());
+    servers[this.serverUrl] = auth;
+    await this.writeStore({ servers });
   }
 
   async readStore(): Promise<OAuthStore> {
@@ -186,15 +223,22 @@ export class LinearOAuthProvider implements OAuthClientProvider {
     }
   }
 
-  async updateStore(patch: Partial<OAuthStore>): Promise<void> {
-    await this.writeStore({ ...(await this.readStore()), ...patch });
-  }
-
   async writeStore(store: OAuthStore): Promise<void> {
     await mkdir(dirname(this.storePath), { recursive: true });
     await writeFile(this.storePath, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
     await chmod(this.storePath, 0o600);
   }
+}
+
+// Stores written before credentials were keyed by URL only ever held default-endpoint logins,
+// so their top-level fields migrate to the default Linear MCP URL.
+function serverEntries(store: OAuthStore): Record<string, ServerAuth> {
+  const { servers, ...legacy } = store;
+  const entries = { ...servers };
+  if (Object.keys(legacy).length > 0 && !entries[DEFAULT_MCP_URL]) {
+    entries[DEFAULT_MCP_URL] = legacy;
+  }
+  return entries;
 }
 
 function defaultAuthStorePath(): string {

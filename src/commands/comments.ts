@@ -1,5 +1,4 @@
-import { parseFlags, usage } from "../args.ts";
-import { renderToon } from "../format.ts";
+import { commandHelp, parseFlags, usage } from "../args.ts";
 import {
   appendContinuationHelp,
   applyTextFileFlag,
@@ -8,23 +7,21 @@ import {
   formatCommandArg,
   requireValue,
 } from "../lib/cli-helpers.ts";
-import { compactComment, paginationInfo } from "../lib/linear-format.ts";
-import { asArray, extractData } from "../lib/mcp-tools.ts";
-import { commentCreateHelp, commentListHelp, groupHelp } from "./help.ts";
 import {
-  DEFAULT_LIMIT,
-  ensureIssueExists,
-  rejectUnsupportedCommentFlags,
-  renderMutation,
-} from "./shared.ts";
+  COMMENT_ECHO_PREVIEW,
+  COMMENT_LIST_PREVIEW,
+  compactComment,
+  paginationInfo,
+} from "../lib/linear-format.ts";
+import { asArray, callToolData } from "../lib/mcp-tools.ts";
+import { commentCreateHelp, commentListHelp, groupHelp } from "./help.ts";
+import { DEFAULT_LIMIT, ensureIssueExists, runMutation } from "./shared.ts";
 
-const COMMENT_CREATE_HELP = ['Run `linear-axi comments create --issue LIN-123 --body "Ready"`'];
-const COMMENT_LIST_FIELDS = ["issue", "limit", "cursor", "orderBy"];
-const COMMENT_CONTINUATION_FLAGS = [
-  ...COMMENT_LIST_FIELDS.filter((name) => name !== "cursor"),
-  "full",
+const COMMENT_CREATE_HELP = [
+  'Run `linear-axi comments create --issue <id> --body "<text>"`',
+  commandHelp("comments create"),
 ];
-const COMMENT_MUTATION_FIELDS = ["issue", "body"];
+const COMMENT_LIST_FIELDS = ["issue", "limit", "cursor", "orderBy"];
 
 export async function commentCommand(args, runtime) {
   return dispatchCommandGroup(args, {
@@ -35,103 +32,85 @@ export async function commentCommand(args, runtime) {
       create: (rest) => createCommentCommand(rest, runtime),
     },
     unknownHelp: [
-      "Run `linear-axi comments list --issue LIN-123`",
-      'Run `linear-axi comments create --issue LIN-123 --body "..."`',
+      "Run `linear-axi comments list --issue <id>`",
+      'Run `linear-axi comments create --issue <id> --body "<text>"`',
     ],
   });
 }
 
 async function listCommentsCommand(args, runtime) {
   const parsed = parseFlags(args, {
-    boolean: ["help", "full"],
-    example: "comments list --issue LIN-123",
+    command: "comments list",
+    value: COMMENT_LIST_FIELDS,
+    boolean: ["full"],
   });
   if (parsed.help) return commentListHelp();
-  rejectUnsupportedCommentFlags(parsed);
   if (!parsed.issue) {
-    throw usage("comments list requires --issue", [
-      "Run `linear-axi comments list --issue LIN-123`",
-    ]);
+    throw usage("comments list requires --issue", ["Run `linear-axi comments list --issue <id>`"]);
   }
   const { issue, ...toolArgs } = collectKnownArgs(
     { ...parsed, limit: parsed.limit ?? DEFAULT_LIMIT },
     COMMENT_LIST_FIELDS,
   );
   toolArgs.issueId = issue;
-  const result = await runtime.client.callTool("list_comments", toolArgs);
-  const data = extractData(result);
+  const data = await callToolData(runtime, "list_comments", toolArgs);
   const comments = asArray(data);
-  const rows = parsed.full ? data : comments.map(compactComment);
-  const rowCount = comments.length;
-  const page = paginationInfo(data, rowCount);
-  const help = [
-    `Run \`linear-axi comments create --issue ${parsed.issue} --body "..."\` to add a comment`,
-  ];
+  const rows = parsed.full
+    ? data
+    : comments.map((comment) => compactComment(comment, COMMENT_LIST_PREVIEW));
+  const page = paginationInfo(data, comments.length);
+  const issueArg = formatCommandArg(parsed.issue);
+  const help = [];
+  if (comments.length === 0) {
+    help.push(
+      `Run \`linear-axi comments create --issue ${issueArg} --body "<text>"\` to add a comment`,
+    );
+  }
   if (!parsed.full && rows.some((comment) => comment.truncated)) {
     help.push(
-      `Run \`linear-axi comments list --issue ${formatCommandArg(parsed.issue)} --full\` to show complete comment bodies`,
+      `Run \`linear-axi comments list --issue ${issueArg} --full\` to show complete comment bodies`,
     );
   }
   appendContinuationHelp(
     help,
     "linear-axi comments list",
     parsed,
-    COMMENT_CONTINUATION_FLAGS,
+    ["issue", "limit", "orderBy", "full"],
     page.cursor,
   );
-  return renderToon({
+  return {
     count: page.count,
     ...(page.cursor ? { cursor: page.cursor } : {}),
     comments: parsed.full ? rows : rows.map(({ truncated: _truncated, ...comment }) => comment),
-    help,
-  });
+    ...(help.length > 0 ? { help } : {}),
+  };
 }
 
 async function createCommentCommand(args, runtime) {
   const parsed = parseFlags(args, {
-    boolean: ["help"],
-    example: 'comments create --issue LIN-123 --body "Ready"',
+    command: "comments create",
+    value: ["issue", "body", "body-file"],
   });
   if (parsed.help) return commentCreateHelp();
-  rejectUnsupportedCommentFlags(parsed);
-  if (parsed.id) {
-    throw usage("comments create supports issue comments only", COMMENT_CREATE_HELP);
-  }
-  const toolArgs = await commentToolArgs(parsed, runtime);
-  requireValue(toolArgs.issueId, "comments create requires --issue", COMMENT_CREATE_HELP);
+  requireValue(parsed.issue, "comments create requires --issue", COMMENT_CREATE_HELP);
+  const toolArgs = collectKnownArgs(parsed, ["body"]);
+  toolArgs.issueId = parsed.issue;
+  await applyTextFileFlag(toolArgs, parsed, { flag: "body-file", field: "body", cwd: runtime.cwd });
   requireValue(toolArgs.body, "--body or --body-file is required", COMMENT_CREATE_HELP);
   await ensureIssueExists(toolArgs.issueId, runtime);
-  return saveComment(toolArgs, runtime);
-}
-
-async function commentToolArgs(parsed, runtime) {
-  const { issue, ...toolArgs } = collectKnownArgs(parsed, COMMENT_MUTATION_FIELDS);
-  if (issue) toolArgs.issueId = issue;
-  await applyTextFileFlag(toolArgs, parsed, {
-    flag: "body-file",
-    field: "body",
-    cwd: runtime.cwd,
-    preserveExisting: true,
-  });
-  return toolArgs;
-}
-
-async function saveComment(toolArgs, runtime) {
-  return renderMutation(runtime, {
+  const issueArg = formatCommandArg(toolArgs.issueId);
+  return runMutation(runtime, {
     tool: "save_comment",
     args: toolArgs,
-    help: [
-      'Run `linear-axi comments create --issue LIN-123 --body "Ready"`',
-      `Run \`linear-axi comments list --issue ${formatCommandArg(toolArgs.issueId)}\` to verify comments`,
-    ],
+    help: [`Run \`linear-axi comments list --issue ${issueArg}\` to check existing comments`],
     render: (comment) => {
-      const { truncated, ...compact } = compactComment(comment);
+      const { truncated, ...compact } = compactComment(comment, COMMENT_ECHO_PREVIEW);
       return {
         comment: compact,
         ...(truncated
           ? {
               help: [
-                `Run \`linear-axi comments list --issue ${formatCommandArg(toolArgs.issueId)} --full\` to show complete comment bodies`,
+                `Run \`linear-axi comments list --issue ${issueArg} --full\` to show complete comment bodies`,
               ],
             }
           : {}),

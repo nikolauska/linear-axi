@@ -1,9 +1,14 @@
+import { AxiError } from "axi-sdk-js";
 import type { ParsedFlags, ParseFlagOptions } from "./types.ts";
 
-export function parseFlags(args: string[], options: ParseFlagOptions = {}): ParsedFlags {
-  const parsed: ParsedFlags = { positionals: [] };
-  const booleanFlags = new Set(options.boolean ?? []);
+export { AxiError };
+
+export function parseFlags(args: string[], options: ParseFlagOptions): ParsedFlags {
+  const parsed: ParsedFlags = { positionals: [], command: options.command };
+  const booleanFlags = new Set(["help", ...(options.boolean ?? [])]);
   const arrayFlags = new Set(options.array ?? []);
+  const valueFlags = new Set([...(options.value ?? []), ...arrayFlags]);
+  const helpHint = commandHelp(options.command);
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -11,6 +16,11 @@ export function parseFlags(args: string[], options: ParseFlagOptions = {}): Pars
     if (arg === "--") {
       parsed.positionals.push(...args.slice(index + 1));
       break;
+    }
+
+    if (arg === "-h") {
+      parsed.help = true;
+      continue;
     }
 
     if (!arg.startsWith("--")) {
@@ -21,72 +31,62 @@ export function parseFlags(args: string[], options: ParseFlagOptions = {}): Pars
     const equals = arg.indexOf("=");
     const name = equals === -1 ? arg.slice(2) : arg.slice(2, equals);
     if (!name) {
-      throw usage("empty flag name", ["Run `linear-axi --help`"]);
+      throw usage("empty flag name", [helpHint]);
+    }
+    // Unknown flags used to be dropped silently, which turned typos into unfiltered lists
+    // and no-op mutations that still reported success.
+    if (!booleanFlags.has(name) && !valueFlags.has(name)) {
+      throw usage(`unknown flag --${name} for linear-axi ${options.command}`, [helpHint]);
     }
 
     let value;
     if (booleanFlags.has(name)) {
-      value = equals === -1 ? true : parseBoolean(arg.slice(equals + 1), name);
+      value = equals === -1 ? true : parseBoolean(arg.slice(equals + 1), name, helpHint);
     } else if (equals !== -1) {
       value = arg.slice(equals + 1);
     } else {
       index += 1;
       if (index >= args.length) {
-        throw usage(`--${name} requires a value`, [
-          `Run \`linear-axi ${options.example ?? "--help"}\``,
-        ]);
+        throw usage(`--${name} requires a value`, [helpHint]);
       }
       value = args[index];
     }
 
     if (arrayFlags.has(name)) {
       parsed[name] = [...(parsed[name] ?? []), value];
+    } else if (parsed[name] !== undefined && name !== "help") {
+      throw usage(`--${name} was given more than once`, [helpHint]);
     } else {
       parsed[name] = value;
     }
   }
 
+  const maxPositionals = options.positionals ?? 0;
+  if (!parsed.help && parsed.positionals.length > maxPositionals) {
+    throw usage(`unexpected argument: ${parsed.positionals[maxPositionals]}`, [helpHint]);
+  }
+
   return parsed;
 }
 
-function parseBoolean(value, flagName) {
+export function commandHelp(command: string) {
+  return `Run \`linear-axi ${command} --help\``;
+}
+
+function parseBoolean(value, flagName, helpHint) {
   if (value === "true") return true;
   if (value === "false") return false;
-  throw usage(`--${flagName} must be true or false`, [`Run \`linear-axi --help\``]);
+  throw usage(`--${flagName} must be true or false`, [helpHint]);
 }
 
-const ERROR_CODES = {
-  usage: "VALIDATION_ERROR",
-  not_found: "NOT_FOUND",
-};
-
-const ERROR_TYPE_MESSAGES = {
-  VALIDATION_ERROR: "The command input or saved local configuration is invalid.",
-  NOT_FOUND: "The requested Linear resource was not found.",
-  OPERATION_ERROR: "The Linear operation failed.",
-};
-
-export class AxiError extends Error {
-  kind: string;
-  help: string[];
-  exitCode: number;
-  code: string;
-  type: string;
-
-  constructor(kind, message, help: string[] = []) {
-    super(message);
-    this.kind = kind;
-    this.help = help;
-    this.exitCode = kind === "usage" ? 2 : 1;
-    this.code = ERROR_CODES[kind] ?? "OPERATION_ERROR";
-    this.type = errorTypeMessage(this.code);
-  }
+export function usage(message: string, help: string[] = []) {
+  return new AxiError(message, "VALIDATION_ERROR", help);
 }
 
-export function usage(message, help: string[] = []) {
-  return new AxiError("usage", message, help);
+export function notFound(resource: string, id: string, help: string[] = []) {
+  return new AxiError(`${resource} not found: ${id}`, "NOT_FOUND", help);
 }
 
-export function errorTypeMessage(code) {
-  return ERROR_TYPE_MESSAGES[code] ?? ERROR_TYPE_MESSAGES.OPERATION_ERROR;
+export function operationError(message: string, help: string[] = []) {
+  return new AxiError(message, "OPERATION_ERROR", help);
 }

@@ -1,58 +1,66 @@
 import { collapseHome } from "../config.ts";
 import { formatCommandArg } from "../lib/cli-helpers.ts";
 import { paginationInfo } from "../lib/linear-format.ts";
-import { asArray, callAvailableTool, extractData } from "../lib/mcp-tools.ts";
+import { asArray, callAvailableTool, callToolData } from "../lib/mcp-tools.ts";
 import { extractWorkspaceName, readRepoProject, validateRepoProject } from "../lib/repo-project.ts";
-import { mcpErrorMessage, workspaceName } from "./shared.ts";
+import { COMMAND_NAMES } from "./help.ts";
+import { normalizeError, workspaceName } from "./shared.ts";
 import type { InputRecord } from "../types.ts";
 
+const COMMANDS_HINT = `Run \`linear-axi <command> --help\` — commands: ${COMMAND_NAMES.join(", ")}`;
+
 export async function homeCommand(runtime) {
-  let issueCount = 0;
-  let issueMore = false;
-  let error;
   const repoProject = await readRepoProject(runtime.cwd);
+  const workspace = await linearWorkspace(runtime);
 
   const output: InputRecord = {
     bin: collapseHome(runtime.binPath),
-    description: "Linear project dashboard",
-    workspace: await linearWorkspaceName(runtime),
+    workspace: workspace.name,
   };
 
   if (!repoProject) {
     output.project = "not initialized";
     output.repo = await workspaceName(runtime.cwd);
+    // A failed lookup used to show `workspace: unknown` with no hint that Linear was unreachable.
+    if (workspace.error) {
+      output.status = "Linear MCP connection unavailable";
+      output.error = workspace.error.message;
+      output.help = [...workspace.error.suggestions, COMMANDS_HINT];
+      return output;
+    }
     output.status = "No default Linear project is configured for this repository";
     output.help = [
       "Run `linear-axi projects list` to find Linear projects",
       'Run `linear-axi init --project "<project>"` to bind this repo',
       "Run `linear-axi issues list --assignee me --all-projects` to list your assigned issues across Linear",
-      "Run `linear-axi <command> <subcommand>` — commands: auth, issues, projects, teams, users, comments, documents",
+      COMMANDS_HINT,
     ];
     return output;
   }
 
-  let validatedProject = repoProject;
+  let issueCount = 0;
+  let issueMore = false;
+  let error;
   try {
-    validatedProject = await validateRepoProject(repoProject, runtime);
-    const result = await runtime.client.callTool("list_issues", {
+    const validatedProject = await validateRepoProject(repoProject, runtime);
+    const data = await callToolData(runtime, "list_issues", {
       assignee: "me",
       limit: 10,
       orderBy: "updatedAt",
       project: validatedProject.project,
     });
-    const data = extractData(result);
     issueCount = asArray(data).length;
     issueMore = Boolean(paginationInfo(data, issueCount).cursor);
   } catch (caught) {
-    error = mcpErrorMessage(caught);
+    error = normalizeError(caught, runtime);
   }
 
   output.project = repoProject.project;
   output.repo = await workspaceName(runtime.cwd);
 
-  if (isInvalidRepoProject(error)) {
+  if (error?.message.startsWith("The saved default Linear project does not exist")) {
     output.status = "Default Linear project is invalid";
-    output.error = error;
+    output.error = error.message;
     output.help = [
       `Run \`linear-axi projects list --query ${formatCommandArg(repoProject.project)} --fields id,name,status\` to search the current workspace`,
       'Run `linear-axi init --project "<project>" --force` to update .linear-project',
@@ -62,33 +70,25 @@ export async function homeCommand(runtime) {
 
   if (error) {
     output.status = "Linear MCP connection unavailable";
-    output.error = error;
-  } else {
-    output.issues = `${issueCount}${issueMore ? "+" : ""} assigned to me in project`;
+    output.error = error.message;
+    output.help = [...error.suggestions, COMMANDS_HINT];
+    return output;
   }
 
-  output.help = [
-    "Run `linear-axi <command> <subcommand>` — commands: auth, issues, projects, teams, users, comments, documents",
-  ];
-
+  output.issues = `${issueCount}${issueMore ? "+" : ""} assigned to me in project`;
+  output.help = ["Run `linear-axi issues list --assignee me` to list them", COMMANDS_HINT];
   return output;
 }
 
-async function linearWorkspaceName(runtime) {
+async function linearWorkspace(runtime) {
   try {
-    const result = await callAvailableTool(
+    const data = await callAvailableTool(
       runtime,
       ["get_organization", "get_workspace", "list_projects", "list_teams"],
       (toolName) => (["list_projects", "list_teams"].includes(toolName) ? { limit: 1 } : {}),
     );
-    return extractWorkspaceName(extractData(result)) ?? "unknown";
-  } catch {
-    return "unknown";
+    return { name: extractWorkspaceName(data) ?? "unknown", error: null };
+  } catch (caught) {
+    return { name: "unknown", error: normalizeError(caught, runtime) };
   }
-}
-
-function isInvalidRepoProject(error) {
-  return (
-    typeof error === "string" && error.startsWith("The saved default Linear project does not exist")
-  );
 }

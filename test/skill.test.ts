@@ -18,15 +18,13 @@ test("skill markdown is installable and points agents at linear-axi", () => {
   );
   assert.match(skill, /npm install -g @nikolauska\/linear-axi/);
   assert.doesNotMatch(skill, /npx -y/);
-  assert.match(skill, /auth login/);
-  assert.match(skill, /linear-axi update --check/);
   assert.doesNotMatch(skill, /gh-axi/);
 });
 
 test("skill command block is generated from top help", () => {
   assert.equal(
     extractCommandsBlock(),
-    `commands[12]:
+    `commands[13]:
   (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels`,
   );
 });

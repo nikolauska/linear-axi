@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { usage } from "../args.ts";
 import { formatCommandArg } from "./cli-helpers.ts";
-import { asArray, extractData, hasTool } from "./mcp-tools.ts";
+import { asArray, callToolData, hasTool, isNotFoundToolError } from "./mcp-tools.ts";
 import { projectMatches } from "./project-match.ts";
 import type { InputRecord, Runtime } from "../types.ts";
 
@@ -80,16 +80,18 @@ export async function validateRepoProject(
 
 async function getValidatingProject(project, runtime) {
   if (await hasTool(runtime, "get_project")) {
-    const detailed = await runtime.client.callTool("get_project", { query: project });
-    const data = extractData(detailed);
-    if (projectMatches(data, project, { normalizeIdentifiers: true })) return data;
+    try {
+      const data = await callToolData(runtime, "get_project", { query: project });
+      if (projectMatches(data, project, { normalizeIdentifiers: true })) return data;
+    } catch (error) {
+      if (!isNotFoundToolError(error)) throw error;
+    }
     if (!(await hasTool(runtime, "list_projects"))) return null;
   }
 
-  const listed = await runtime.client.callTool("list_projects", { query: project, limit: 10 });
-  const projects = asArray(extractData(listed));
+  const listed = await callToolData(runtime, "list_projects", { query: project, limit: 10 });
   return (
-    projects.find((candidate) =>
+    asArray(listed).find((candidate) =>
       projectMatches(candidate, project, { normalizeIdentifiers: true }),
     ) ?? null
   );

@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import { parseFlags, usage } from "../args.ts";
-import { renderToon } from "../format.ts";
-import { dispatchCommandGroup, parseFiniteNumber } from "../lib/cli-helpers.ts";
+import { dispatchCommandGroup } from "../lib/cli-helpers.ts";
 import { authFinishHelp, authLoginHelp, authLogoutHelp, groupHelp } from "./help.ts";
 
 export async function authCommand(args, runtime) {
@@ -22,54 +21,63 @@ export async function authCommand(args, runtime) {
 }
 
 async function loginCommand(args, runtime) {
-  const parsed = parseFlags(args, { boolean: ["help", "manual"], example: "auth login" });
+  const parsed = parseFlags(args, {
+    command: "auth login",
+    value: ["timeout"],
+    boolean: ["manual"],
+  });
   if (parsed.help) return authLoginHelp();
+  const timeoutMs = Number(parsed.timeout ?? 300000);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
+    throw usage("--timeout must be a positive number of milliseconds", [
+      "Run `linear-axi auth login --help`",
+    ]);
+  }
   try {
     await runtime.client.listTools();
-    return renderToon({ auth: "Linear MCP OAuth already authorized" });
+    return { auth: "Linear MCP OAuth already authorized" };
   } catch (error) {
     const authorizationUrl = authUrl(error);
     if (authorizationUrl) {
       if (parsed.manual) {
-        return renderToon({
+        return {
           auth: "Linear MCP OAuth authorization required",
           url: authorizationUrl,
           help: ["Open the URL, copy the code, then run `linear-axi auth finish --code <code>`"],
-        });
+        };
       }
 
-      return completeLoginWithCallback(authorizationUrl, runtime, parsed);
+      return completeLoginWithCallback(authorizationUrl, runtime, timeoutMs);
     }
     throw error;
   }
 }
 
 async function finishCommand(args, runtime) {
-  const parsed = parseFlags(args, { boolean: ["help"], example: "auth finish --code <code>" });
+  const parsed = parseFlags(args, { command: "auth finish", value: ["code"] });
   if (parsed.help) return authFinishHelp();
   if (!parsed.code)
     throw usage("--code is required", ["Run `linear-axi auth finish --code <code>`"]);
   await runtime.client.finishAuth(parsed.code);
-  return renderToon({ auth: "Linear MCP OAuth authorized" });
+  return { auth: "Linear MCP OAuth authorized" };
 }
 
 async function logoutCommand(args, runtime) {
-  const parsed = parseFlags(args, { boolean: ["help"], example: "auth logout" });
+  const parsed = parseFlags(args, { command: "auth logout" });
   if (parsed.help) return authLogoutHelp();
   const result = await runtime.client.logoutAuth();
   const auth = result.removed
     ? "Linear MCP OAuth credentials cleared"
     : "Linear MCP OAuth credentials already absent";
-  return renderToon({
+  return {
     auth,
     ...(result.tokenConfigured
       ? { note: "LINEAR_AXI_MCP_TOKEN or LINEAR_MCP_TOKEN remains configured" }
       : {}),
-  });
+  };
 }
 
-async function completeLoginWithCallback(authorizationUrl, runtime, parsed) {
-  const timeoutMs = parseFiniteNumber("timeout", parsed.timeout ?? 300000);
+async function completeLoginWithCallback(authorizationUrl, runtime, timeoutMs) {
   const callbackUrl = new URL("http://127.0.0.1:14566/oauth/callback");
   const expectedState = new URL(authorizationUrl).searchParams.get("state");
   if (!expectedState) {
@@ -79,22 +87,20 @@ async function completeLoginWithCallback(authorizationUrl, runtime, parsed) {
   }
   const server = await startOAuthCallbackServer(callbackUrl, timeoutMs, expectedState);
 
-  runtime.stdout?.write?.(
-    renderToon({
-      auth: "Linear MCP OAuth authorization required",
-      url: authorizationUrl,
-      callback: callbackUrl.toString(),
-      help: [
-        "Open the URL in a browser to finish automatically",
-        "If callback capture fails, rerun `linear-axi auth login --manual`",
-      ],
-    }),
+  // stdout carries only the final result; the URL is progress the user needs while waiting.
+  runtime.stderr?.write?.(
+    [
+      "Open this URL in a browser to authorize linear-axi:",
+      authorizationUrl,
+      `Waiting for the callback on ${callbackUrl} (rerun with --manual if it cannot reach this machine)`,
+      "",
+    ].join("\n"),
   );
 
   try {
     const code = await server.code;
     await runtime.client.finishAuth(code);
-    return renderToon({ auth: "Linear MCP OAuth authorized" });
+    return { auth: "Linear MCP OAuth authorized" };
   } finally {
     await server.close();
   }

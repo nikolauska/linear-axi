@@ -1,9 +1,8 @@
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { AxiError as SdkAxiError, exitCodeForError, runAxiCli } from "axi-sdk-js";
-import { usage } from "./args.ts";
+import { encode } from "@toon-format/toon";
+import { runAxiCli } from "axi-sdk-js";
 import { resolveMcpUrl } from "./config.ts";
-import { renderToon } from "./format.ts";
 import { LinearMcpClient } from "./mcp.ts";
 import { authCommand } from "./commands/auth.ts";
 import { commentCommand } from "./commands/comments.ts";
@@ -16,19 +15,14 @@ import { issueCommand } from "./commands/issues.ts";
 import { listResourceCommand } from "./commands/list-resource.ts";
 import { milestoneCommand } from "./commands/milestones.ts";
 import { projectCommand } from "./commands/projects.ts";
-import { LIST_TOOL_ALIASES, normalizeError } from "./commands/shared.ts";
+import { normalizeError } from "./commands/shared.ts";
 import { statusCommand } from "./commands/statuses.ts";
 import { DESCRIPTION } from "./skill.ts";
+import type { MainContext, Runtime } from "./types.ts";
 
 const { version: VERSION } = createRequire(import.meta.url)("../package.json");
 
 const COMMANDS = {
-  ...Object.fromEntries(
-    Object.keys(LIST_TOOL_ALIASES).map((command) => [
-      command,
-      (args, runtime) => listResourceCommand(command, args, runtime),
-    ]),
-  ),
   init: initCommand,
   auth: authCommand,
   issues: issueCommand,
@@ -45,91 +39,50 @@ const COMMANDS = {
   document: documentCommand,
   projects: projectCommand,
   project: projectCommand,
+  teams: (args, runtime) => listResourceCommand("teams", args, runtime),
+  team: (args, runtime) => listResourceCommand("teams", args, runtime),
+  users: (args, runtime) => listResourceCommand("users", args, runtime),
+  user: (args, runtime) => listResourceCommand("users", args, runtime),
+  labels: (args, runtime) => listResourceCommand("labels", args, runtime),
+  label: (args, runtime) => listResourceCommand("labels", args, runtime),
 };
 
-export async function main(args, context) {
-  await runAxiCli(cliOptions(args, context));
-}
-
-export async function run(args, runtime) {
-  if (args.length === 0) {
-    return renderToon(await homeCommand(runtime));
-  }
-
-  const [command, ...rest] = args;
-  if (command === "--help" || command === "-h") return topHelp();
-  const handler = COMMANDS[command];
-  if (handler) return handler(rest, runtime);
-
-  throw usage(`unknown command: ${command}`, [
-    "Run `linear-axi`",
-    'Run `linear-axi init --project "<project>"`',
-    "Run `linear-axi issues list`",
-    "Run `linear-axi projects list`",
-    "Run `linear-axi teams list`",
-  ]);
-}
-
-function trimFinalNewline(output) {
-  return typeof output === "string" ? output.replace(/\n$/, "") : output;
-}
-
-function cliOptions(args, context) {
-  return {
+export async function main(args: string[], context: MainContext) {
+  await runAxiCli<Runtime>({
     argv: args.length === 1 && args[0] === "-h" ? ["--help"] : args,
     stdout: context.stdout,
     description: DESCRIPTION,
     version: VERSION,
     topLevelHelp: topHelp(),
-    home: withRuntimeCleanup(async (_args, runtime) => homeCommand(runtime)),
+    home: withCommandBoundary(async (_args, runtime) => homeCommand(runtime)),
     commands: Object.fromEntries(
-      Object.entries(COMMANDS).map(([name, command]) => [
-        name,
-        withRuntimeCleanup(async (commandArgs, runtime) =>
-          trimFinalNewline(await command(commandArgs, runtime)),
-        ),
-      ]),
+      Object.entries(COMMANDS).map(([name, command]) => [name, withCommandBoundary(command)]),
     ),
     resolveContext: () => makeRuntime(context),
-    formatError,
-  };
+    renderUnknownCommand: (command) =>
+      `${encode({
+        error: `unknown command: ${command}`,
+        code: "VALIDATION_ERROR",
+        help: ["Run `linear-axi --help` to list commands", "Run `linear-axi` for the dashboard"],
+      })}\n`,
+  });
 }
 
-function withRuntimeCleanup(handler) {
+// The SDK renders AxiError values itself; everything else is translated here so dependency
+// failures never reach stdout as raw messages or UNKNOWN codes.
+function withCommandBoundary(handler) {
   return async (args, runtime) => {
     try {
       return await handler(args, runtime);
+    } catch (error) {
+      throw normalizeError(error, runtime);
     } finally {
       await runtime?.client?.close();
     }
   };
 }
 
-export function formatError(error) {
-  if (error instanceof SdkAxiError) {
-    return {
-      output: renderToon({
-        error: error.message,
-        code: error.code,
-        ...(error.suggestions.length > 0 ? { help: error.suggestions } : {}),
-      }),
-      exitCode: exitCodeForError(error),
-    };
-  }
-
-  const axiError = normalizeError(error);
-  return {
-    output: renderToon({
-      error: axiError.message,
-      code: axiError.code,
-      type: axiError.type,
-      ...(axiError.help.length > 0 ? { help: axiError.help } : {}),
-    }),
-    exitCode: axiError.exitCode,
-  };
-}
-
-export async function makeRuntime(context) {
+export async function makeRuntime(context: MainContext): Promise<Runtime> {
   const url = await resolveMcpUrl(context.env);
   return {
     cwd: context.cwd,
@@ -137,10 +90,12 @@ export async function makeRuntime(context) {
     binPath: executablePath(),
     mcpUrl: url,
     stdout: context.stdout,
+    stderr: context.stderr,
     client:
       context.client ??
       new LinearMcpClient({
         url,
+        version: VERSION,
         token: context.env.LINEAR_AXI_MCP_TOKEN ?? context.env.LINEAR_MCP_TOKEN,
         authStorePath: context.env.LINEAR_AXI_AUTH_FILE,
       }),

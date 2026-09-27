@@ -1,68 +1,23 @@
 import { basename, resolve } from "node:path";
-import { AxiError, usage } from "../args.ts";
-import { renderToon } from "../format.ts";
-import { formatCommandArg, TOOL_BOOLEAN_FLAGS } from "../lib/cli-helpers.ts";
+import { AxiError, notFound, operationError } from "../args.ts";
+import { formatCommandArg } from "../lib/cli-helpers.ts";
 import { sanitizeDocument } from "../lib/linear-format.ts";
 import {
   asArray,
   callAvailableTool,
-  extractData,
+  callToolData,
   hasTool,
+  isNotFoundToolError,
   isUnknownToolError,
-  mutationData,
+  LinearToolError,
 } from "../lib/mcp-tools.ts";
 import { projectMatches } from "../lib/project-match.ts";
 import { findGitRoot } from "../lib/repo-project.ts";
+import type { Runtime } from "../types.ts";
 
 export const DEFAULT_LIMIT = 50;
 
-export const LIST_TOOL_ALIASES = {
-  issues: ["list_issues"],
-  issue: ["list_issues"],
-  projects: ["list_projects"],
-  project: ["list_projects"],
-  teams: ["list_teams"],
-  team: ["list_teams"],
-  users: ["list_users"],
-  user: ["list_users"],
-  documents: ["list_documents"],
-  document: ["list_documents"],
-  labels: ["list_issue_labels"],
-  label: ["list_issue_labels"],
-};
-
-export const PROJECT_SCOPED_LIST_ALIASES = ["issues", "documents"];
-
-export const LIST_BOOLEAN_FLAGS = ["full", "all-projects", ...TOOL_BOOLEAN_FLAGS];
-
-export const LIST_TOOL_ARG_FLAGS = [
-  "assignee",
-  "createdAt",
-  "cursor",
-  "cycle",
-  "delegate",
-  "label",
-  "limit",
-  "member",
-  "name",
-  "orderBy",
-  "parentId",
-  "priority",
-  "project",
-  "query",
-  "state",
-  "team",
-  "teamId",
-  "updatedAt",
-  ...TOOL_BOOLEAN_FLAGS,
-];
-
-export const LIST_CONTINUATION_FLAGS = [
-  ...LIST_TOOL_ARG_FLAGS.filter((name) => name !== "cursor"),
-  "fields",
-  "full",
-  "all-projects",
-];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function getIssueDetail(id, runtime) {
   return getDetailWithListFallback(runtime, {
@@ -77,25 +32,17 @@ export async function getIssueDetail(id, runtime) {
 
 export async function ensureIssueExists(id, runtime) {
   return requireExistingDetail(getIssueDetail(id, runtime), "issue", id, [
-    `Run \`linear-axi issues list --query ${formatCommandArg(id)}\` to search for the issue`,
-    'Run `linear-axi issues create --title "Title" --team "<team>"` to create a new issue',
+    `Run \`linear-axi issues list --all-projects --query ${formatCommandArg(id)}\` to search for the issue`,
   ]);
 }
 
-export async function ensureIssueDoesNotExist(title, team, runtime) {
-  await ensureNamedResourceDoesNotExist(runtime, {
-    resource: "issue",
+export async function findExistingIssue(title, team, runtime) {
+  return findNamedResource(runtime, {
     listTool: "list_issues",
     listArgs: { query: title, team, limit: 10 },
     query: title,
     team,
     name: (issue) => issue.title,
-    id: (issue) => issue.identifier ?? issue.id ?? "<id>",
-    help: (id) => [
-      `Run \`linear-axi issues view ${id}\` to inspect the existing issue`,
-      `Run \`linear-axi issues update --id ${id} --state "<state>"\` to edit it`,
-      `Run \`linear-axi issues create --title ${formatCommandArg(`${title} copy`)} --team ${formatCommandArg(team)}\` to create a distinct issue`,
-    ],
   });
 }
 
@@ -116,24 +63,16 @@ export async function getProjectDetail(id, runtime) {
 export async function ensureProjectExists(id, runtime) {
   return requireExistingDetail(getProjectDetail(id, runtime), "project", id, [
     `Run \`linear-axi projects list --query ${formatCommandArg(id)} --fields id,name,status\` to search for the project`,
-    'Run `linear-axi projects create --name "Roadmap" --team "<team>"` to create a new project',
   ]);
 }
 
-export async function ensureProjectDoesNotExist(name, team, runtime) {
-  await ensureNamedResourceDoesNotExist(runtime, {
-    resource: "project",
+export async function findExistingProject(name, team, runtime) {
+  return findNamedResource(runtime, {
     listTool: "list_projects",
     listArgs: { query: name, limit: 10 },
     query: name,
     team,
     name: (project) => project.name,
-    id: (project) => project.id ?? project.slugId ?? "<id>",
-    help: (id) => [
-      `Run \`linear-axi projects list --query ${formatCommandArg(name)} --full\` to inspect matching projects`,
-      `Run \`linear-axi projects update --id ${id} --summary "Updated scope"\` to edit it`,
-      `Run \`linear-axi projects create --name ${formatCommandArg(`${name} copy`)} --team ${formatCommandArg(team)}\` to create a distinct project`,
-    ],
   });
 }
 
@@ -148,22 +87,42 @@ export function projectSaveToolArgs(toolName, args) {
   };
 }
 
-export async function renderMutation(runtime, options) {
-  const result = options.toolNames
-    ? await callAvailableTool(runtime, options.toolNames, options.argsForTool ?? options.args)
-    : await runtime.client.callTool(options.tool, options.args);
-  return renderToon(options.render(mutationData(result, options.help)));
+// Tool failures become errors that point at the lookup command for the rejected value, plus the
+// command-specific recovery help that carries the caller's real ids.
+export async function runMutation(runtime: Runtime, options) {
+  let data;
+  try {
+    data = options.toolNames
+      ? await callAvailableTool(runtime, options.toolNames, options.argsForTool ?? options.args)
+      : await callToolData(runtime, options.tool, options.args);
+  } catch (error) {
+    if (error instanceof LinearToolError) {
+      throw toolFailure(error, { team: options.team, help: options.help });
+    }
+    throw error;
+  }
+  // A save that returns only unparsed text has no record to confirm, so reporting success
+  // would hide a failure that Linear did not flag with isError.
+  if (
+    data &&
+    typeof data === "object" &&
+    Object.keys(data).length === 1 &&
+    typeof data.text === "string"
+  ) {
+    throw operationError(data.text.replace(/^Error:\s*/i, ""), options.help ?? []);
+  }
+  return options.render(data);
 }
 
-export function renderDetailView(options) {
-  if (options.full) return renderToon({ [options.resource]: options.detail });
+export function detailView(options) {
+  if (options.full) return { [options.resource]: options.detail };
   const compact = options.compact(options.detail);
-  return renderToon({
+  return {
     [options.resource]: compact[options.resource],
     ...(compact.truncated
       ? { help: [`Run \`${options.fullCommand}\` to show the complete ${options.resource}`] }
       : {}),
-  });
+  };
 }
 
 export async function getDocumentDetail(id, runtime) {
@@ -176,6 +135,12 @@ export async function getDocumentDetail(id, runtime) {
     matches: (document) => document.id === id || document.slugId === id,
     transform: (document) => sanitizeDocument(document, id),
   });
+}
+
+export async function ensureDocumentExists(id, runtime) {
+  return requireExistingDetail(getDocumentDetail(id, runtime), "document", id, [
+    `Run \`linear-axi documents list --all-projects --query ${formatCommandArg(id)} --fields id,title,updatedAt\` to search for the document`,
+  ]);
 }
 
 async function getDetailWithListFallback(runtime, options) {
@@ -192,10 +157,9 @@ async function getDetailWithListFallback(runtime, options) {
 
   if (!options.requireKnownDetailTool || knownToolNames.has(options.detailTool)) {
     try {
-      const detailed = options.requireKnownDetailTool
-        ? await runtime.client.callTool(options.detailTool, options.detailArgs)
+      const data = options.requireKnownDetailTool
+        ? await callToolData(runtime, options.detailTool, options.detailArgs)
         : await callAvailableTool(runtime, [options.detailTool], options.detailArgs);
-      const data = extractData(detailed);
       if (isBlankDetail(data, options.identityFields)) {
         if (!options.fallbackOnBlankDetail || !(await hasListTool())) return null;
       } else if (options.detailMatches && !options.detailMatches(data)) {
@@ -204,12 +168,16 @@ async function getDetailWithListFallback(runtime, options) {
         return detailResult(data, options);
       }
     } catch (error) {
-      if (!isUnknownToolError(error)) throw error;
+      if (isNotFoundToolError(error)) {
+        if (!options.fallbackOnBlankDetail || !(await hasListTool())) return null;
+      } else if (!isUnknownToolError(error)) {
+        throw error;
+      }
     }
   }
 
-  const listed = await runtime.client.callTool(options.listTool, options.listArgs);
-  const match = asArray(extractData(listed)).find(options.matches);
+  const listed = await callToolData(runtime, options.listTool, options.listArgs);
+  const match = asArray(listed).find(options.matches);
   if (!match) return null;
   return detailResult(match, options);
 }
@@ -218,26 +186,13 @@ function detailResult(detail, options) {
   return options.transform ? options.transform(detail) : detail;
 }
 
-async function ensureNamedResourceDoesNotExist(runtime, options) {
-  const listed = await runtime.client.callTool(options.listTool, options.listArgs);
-  const match = asArray(extractData(listed)).find((item) => {
-    return isSameText(options.name(item), options.query) && belongsToTeam(item, options.team);
-  });
-  if (!match) return;
-  const id = options.id(match);
-  const name = options.name(match) ?? options.query;
-  throw new AxiError(
-    "operational",
-    `${options.resource} already exists: ${id} ${name}`,
-    options.help(id),
+async function findNamedResource(runtime, options) {
+  const listed = await callToolData(runtime, options.listTool, options.listArgs);
+  return (
+    asArray(listed).find(
+      (item) => isSameText(options.name(item), options.query) && belongsToTeam(item, options.team),
+    ) ?? null
   );
-}
-
-export async function ensureDocumentExists(id, runtime) {
-  return requireExistingDetail(getDocumentDetail(id, runtime), "document", id, [
-    `Run \`linear-axi documents list --query ${formatCommandArg(id)} --fields id,title,updatedAt\` to search for the document`,
-    'Run `linear-axi documents create --title "Spec" --team "<team>"` to create a new document',
-  ]);
 }
 
 async function requireExistingDetail(detailPromise, resource, id, help) {
@@ -247,82 +202,108 @@ async function requireExistingDetail(detailPromise, resource, id, help) {
 }
 
 export async function ensureMilestoneExists(project, id, runtime) {
-  const result = await runtime.client.callTool("get_milestone", { project, query: id });
-  const milestone = extractData(result);
-  if (!milestone || isEmptyContainer(milestone)) {
-    throw notFound("milestone", id, [
-      `Run \`linear-axi milestones list --project ${formatCommandArg(project)}\` to find the milestone id`,
-      `Run \`linear-axi milestones create --project ${formatCommandArg(project)} --name "<name>"\` to create a new milestone`,
-    ]);
+  const help = [
+    `Run \`linear-axi milestones list --project ${formatCommandArg(project)}\` to find the milestone id`,
+  ];
+  let milestone;
+  try {
+    milestone = await callToolData(runtime, "get_milestone", { project, query: id });
+  } catch (error) {
+    if (isNotFoundToolError(error)) throw notFound("milestone", id, help);
+    throw error;
   }
+  if (!milestone || isEmptyContainer(milestone)) throw notFound("milestone", id, help);
   return milestone;
 }
 
-export function rejectUnsupportedCommentFlags(parsed) {
-  const unsupported = [
-    "issueId",
-    "project",
-    "projectId",
-    "initiative",
-    "initiativeId",
-    "document",
-    "documentId",
-    "milestone",
-    "milestoneId",
-    "parentId",
-  ].find((name) => parsed[name] !== undefined);
-  if (unsupported) {
-    throw usage(`--${unsupported} is not supported for comments`, [
-      "Run `linear-axi comments list --issue LIN-123`",
-      'Run `linear-axi comments create --issue LIN-123 --body "Ready"`',
-    ]);
+// list_cycles and list_documents only accept team ids, while users naturally pass a key or name.
+export async function resolveTeamId(team, runtime) {
+  if (UUID_PATTERN.test(team)) return team;
+  let data;
+  try {
+    data = await callToolData(runtime, "get_team", { query: team });
+  } catch (error) {
+    if (!isNotFoundToolError(error)) throw error;
   }
+  if (!data?.id) {
+    throw notFound("team", team, ["Run `linear-axi teams list` to list teams"]);
+  }
+  return data.id;
 }
 
-export function normalizeError(error) {
+// list_documents filters by project id or slug, but repo defaults and flags may hold a name.
+export async function resolveProjectId(project, runtime) {
+  const detail = await ensureProjectExists(project, runtime);
+  return detail.id ?? detail.slugId ?? project;
+}
+
+export function normalizeError(error, runtime?: Pick<Runtime, "mcpUrl">) {
   if (error instanceof AxiError) return error;
   if (error?.authorizationUrl) {
-    return new AxiError("operational", "Linear MCP OAuth authorization required", [
+    return operationError("Linear MCP OAuth authorization required", [
       "Run `linear-axi auth login`",
-      "Open the authorization URL and finish with `linear-axi auth finish --code <code>`",
+      "Run `linear-axi auth login --manual` if the browser cannot reach this machine",
     ]);
   }
-  return new AxiError("operational", mcpErrorMessage(error), [
-    "Run `linear-axi issues list --assignee me` to verify Linear access",
-    "Run `linear-axi auth login` to authorize the default Linear MCP endpoint",
+  if (error instanceof LinearToolError) return toolFailure(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (/unauthorized|\b401\b|invalid_token|access token/i.test(message)) {
+    return operationError("Linear MCP authentication failed", [
+      "Run `linear-axi auth login` to authorize again",
+      "Check LINEAR_AXI_MCP_TOKEN or LINEAR_MCP_TOKEN if a bearer token is configured",
+    ]);
+  }
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|socket hang up/i.test(message)) {
+    const target = runtime?.mcpUrl ? ` at ${runtime.mcpUrl}` : "";
+    return operationError(`Could not reach the Linear MCP server${target}`, [
+      "Check network access and retry",
+      "Set LINEAR_AXI_MCP_URL to use a different Linear MCP endpoint",
+    ]);
+  }
+  return operationError(message, ["Run `linear-axi teams list` to verify Linear access"]);
+}
+
+export function toolFailure(
+  error: LinearToolError,
+  context: { team?: string; help?: string[] } = {},
+) {
+  return new AxiError(error.message, error.notFound ? "NOT_FOUND" : "OPERATION_ERROR", [
+    ...lookupHints(error.message, context.team),
+    ...(context.help ?? []),
   ]);
 }
 
-export function notFound(resource, id, help = []) {
-  return new AxiError("not_found", `${resource} not found: ${id}`, help);
-}
-
-export function mcpErrorMessage(error) {
-  if (error?.authorizationUrl) {
-    return "Linear MCP OAuth authorization required";
+function lookupHints(message: string, team?: string) {
+  const quoted = message.match(/"([^"]+)"/)?.[1];
+  const value = quoted ? formatCommandArg(quoted) : '"<text>"';
+  const teamArg = team ? formatCommandArg(team) : '"<team>"';
+  if (/could not find (?:workflow )?state/i.test(message)) {
+    return [`Run \`linear-axi statuses list --team ${teamArg}\` to list valid states`];
   }
-  const message = error && typeof error.message === "string" ? error.message : String(error);
-  if (/unauthorized|401|invalid_token|access token/i.test(message)) {
-    return "Linear MCP authentication failed";
+  if (/could not find user/i.test(message)) {
+    return [`Run \`linear-axi users list --query ${value}\` to find the user`];
   }
-  return message;
+  if (/could not find label/i.test(message)) {
+    return [`Run \`linear-axi labels list${team ? ` --team ${teamArg}` : ""}\` to list labels`];
+  }
+  if (/could not find team/i.test(message)) {
+    return ["Run `linear-axi teams list` to list teams"];
+  }
+  if (/could not find project/i.test(message)) {
+    return [`Run \`linear-axi projects list --query ${value}\` to find the project`];
+  }
+  if (/could not find cycle/i.test(message)) {
+    return [`Run \`linear-axi cycles list --team ${teamArg}\` to list cycles`];
+  }
+  if (/could not find issue/i.test(message)) {
+    return [`Run \`linear-axi issues list --all-projects --query ${value}\` to find the issue`];
+  }
+  return [];
 }
 
 export async function workspaceName(cwd) {
   const root = await findGitRoot(cwd);
   return basename(root ?? resolve(cwd));
-}
-
-export function pluralName(name) {
-  const names = {
-    issue: "issues",
-    project: "projects",
-    team: "teams",
-    user: "users",
-    document: "documents",
-    label: "labels",
-  };
-  return names[name] ?? name;
 }
 
 function isSameText(left, right) {

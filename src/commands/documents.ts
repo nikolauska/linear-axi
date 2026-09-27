@@ -1,8 +1,9 @@
-import { parseFlags, usage } from "../args.ts";
+import { commandHelp, parseFlags, usage } from "../args.ts";
 import {
   applyTextFileFlag,
   collectKnownArgs,
   dispatchCommandGroup,
+  formatCommandArg,
   rejectIdOnCreate,
   requireValue,
 } from "../lib/cli-helpers.ts";
@@ -10,10 +11,9 @@ import { compactDocumentDetail, compactDocumentMutation } from "../lib/linear-fo
 import { applyRepoProjectDefault } from "../lib/repo-project.ts";
 import { documentCreateHelp, documentUpdateHelp, documentViewHelp, groupHelp } from "./help.ts";
 import { aliasListCommand } from "./list-resource.ts";
-import { ensureDocumentExists, renderDetailView, renderMutation } from "./shared.ts";
+import { detailView, ensureDocumentExists, runMutation } from "./shared.ts";
 
-const DOCUMENT_MUTATION_FIELDS = [
-  "id",
+const DOCUMENT_FIELDS = [
   "title",
   "team",
   "project",
@@ -24,14 +24,17 @@ const DOCUMENT_MUTATION_FIELDS = [
   "icon",
   "content",
 ];
-const DOCUMENT_CREATE_HELP = ['Run `linear-axi documents create --title "Spec" --team "<team>"`'];
+const DOCUMENT_CREATE_HELP = [
+  'Run `linear-axi documents create --title "<title>" --team "<team>"`',
+  commandHelp("documents create"),
+];
 const DOCUMENT_UPDATE_HELP = [
-  'Run `linear-axi documents update --id <id> --content "Updated"`',
-  "Run `linear-axi documents list --query <text>` to find the document id",
+  'Run `linear-axi documents update --id <id> --content "<markdown>"`',
+  "Run `linear-axi documents list --all-projects --query <text>` to find the document id",
 ];
 const DOCUMENT_ID_ON_CREATE_HELP = [
-  'Run `linear-axi documents create --title "Spec" --team "<team>" --content-file spec.md`',
-  'Run `linear-axi documents update --id <id> --content "Updated"` to edit an existing document',
+  'Run `linear-axi documents create --title "<title>" --team "<team>" --content-file <path>`',
+  'Run `linear-axi documents update --id <id> --content "<markdown>"` to edit an existing document',
 ];
 
 export async function documentCommand(args, runtime) {
@@ -47,64 +50,81 @@ export async function documentCommand(args, runtime) {
     unknownHelp: [
       "Run `linear-axi documents list`",
       "Run `linear-axi documents view <id>`",
-      'Run `linear-axi documents create --title "Spec" --team ENG`',
+      'Run `linear-axi documents create --title "<title>" --team "<team>"`',
     ],
   });
 }
 
 async function viewDocumentCommand(args, runtime) {
-  const parsed = parseFlags(args, { boolean: ["help", "full"], example: "documents view <id>" });
+  const parsed = parseFlags(args, {
+    command: "documents view",
+    value: ["id"],
+    boolean: ["full"],
+    positionals: 1,
+  });
   if (parsed.help) return documentViewHelp();
   const id = parsed.positionals[0] ?? parsed.id;
   if (!id) throw usage("document id is required", ["Run `linear-axi documents view <id>`"]);
   const detail = await ensureDocumentExists(id, runtime);
-  return renderDetailView({
+  return detailView({
     resource: "document",
     detail,
     full: parsed.full,
     compact: (document) => compactDocumentDetail(document, id),
-    fullCommand: `linear-axi documents view ${id} --full`,
+    fullCommand: `linear-axi documents view ${formatCommandArg(id)} --full`,
   });
 }
 
 async function createDocumentCommand(args, runtime) {
   const parsed = parseFlags(args, {
-    boolean: ["help"],
-    example: 'documents create --title "Spec" --team ENG',
+    command: "documents create",
+    value: [...DOCUMENT_FIELDS, "id", "content-file"],
   });
   if (parsed.help) return documentCreateHelp();
   rejectIdOnCreate("document", DOCUMENT_ID_ON_CREATE_HELP, parsed);
-  const toolArgs = await documentToolArgs(parsed, runtime, { applyDefaultProject: true });
-  requireValue(toolArgs.title, "creating a document requires --title", DOCUMENT_CREATE_HELP);
-  return saveDocument(toolArgs, runtime, ["create_document", "save_document"]);
-}
-
-async function updateDocumentCommand(args, runtime) {
-  const parsed = parseFlags(args, {
-    boolean: ["help"],
-    example: 'documents update --id <id> --content "Updated"',
-  });
-  if (parsed.help) return documentUpdateHelp();
+  requireValue(parsed.title, "creating a document requires --title", DOCUMENT_CREATE_HELP);
   const toolArgs = await documentToolArgs(parsed, runtime);
-  requireValue(toolArgs.id, "updating a document requires --id", DOCUMENT_UPDATE_HELP);
-  await ensureDocumentExists(toolArgs.id, runtime);
-  return saveDocument(toolArgs, runtime, ["update_document", "save_document"]);
-}
-
-async function documentToolArgs(parsed, runtime, options: { applyDefaultProject?: boolean } = {}) {
-  const toolArgs = collectKnownArgs(parsed, DOCUMENT_MUTATION_FIELDS);
-  if (
-    options.applyDefaultProject &&
-    !toolArgs.team &&
-    !toolArgs.issue &&
-    !toolArgs.initiative &&
-    !toolArgs.cycle
-  ) {
+  if (!toolArgs.team && !toolArgs.issue && !toolArgs.initiative && !toolArgs.cycle) {
     await applyRepoProjectDefault(toolArgs, runtime, {
       command: "linear-axi documents create",
       requireProject: true,
     });
   }
+  return saveDocument(
+    toolArgs,
+    runtime,
+    ["create_document", "save_document"],
+    DOCUMENT_CREATE_HELP,
+  );
+}
+
+async function updateDocumentCommand(args, runtime) {
+  const parsed = parseFlags(args, {
+    command: "documents update",
+    value: [...DOCUMENT_FIELDS, "id", "content-file"],
+  });
+  if (parsed.help) return documentUpdateHelp();
+  requireValue(parsed.id, "updating a document requires --id", DOCUMENT_UPDATE_HELP);
+  const toolArgs = { id: parsed.id, ...(await documentToolArgs(parsed, runtime)) };
+  if (Object.keys(toolArgs).length === 1) {
+    throw usage("documents update needs at least one field to change", [
+      commandHelp("documents update"),
+    ]);
+  }
+  await ensureDocumentExists(toolArgs.id, runtime);
+  return saveDocument(
+    toolArgs,
+    runtime,
+    ["update_document", "save_document"],
+    [
+      `Run \`linear-axi documents view ${formatCommandArg(toolArgs.id)}\` to check the current values`,
+      commandHelp("documents update"),
+    ],
+  );
+}
+
+async function documentToolArgs(parsed, runtime) {
+  const toolArgs = collectKnownArgs(parsed, DOCUMENT_FIELDS);
   await applyTextFileFlag(toolArgs, parsed, {
     flag: "content-file",
     field: "content",
@@ -113,14 +133,12 @@ async function documentToolArgs(parsed, runtime, options: { applyDefaultProject?
   return toolArgs;
 }
 
-async function saveDocument(toolArgs, runtime, toolNames) {
-  return renderMutation(runtime, {
+async function saveDocument(toolArgs, runtime, toolNames, help) {
+  return runMutation(runtime, {
     toolNames,
     args: toolArgs,
-    help: [
-      'Run `linear-axi documents create --title "Spec" --team "<team>" --content-file spec.md`',
-      "Run `linear-axi documents view <id>` to read a document",
-    ],
+    team: toolArgs.team,
+    help,
     render: (document) => ({ document: compactDocumentMutation(document) }),
   });
 }

@@ -7,41 +7,29 @@ description: "Operate Linear through the linear-axi CLI - issues, projects, team
 
 Agent ergonomic wrapper around the configured Linear MCP server. Prefer this over raw Linear MCP calls for Linear operations.
 
-Check whether `linear-axi` is installed before using it. If it is missing, ask the user to install the standalone CLI globally with `npm install -g @nikolauska/linear-axi`.
-linear-axi requires Node.js 24 or newer.
-
-linear-axi uses the configured Linear MCP server. The default remote endpoint uses OAuth; if authorization is required, run `linear-axi auth login`. Run `linear-axi auth logout` to clear saved OAuth credentials without changing bearer-token environment variables.
+Check whether `linear-axi` is installed before using it. If it is missing, ask the user to install the standalone CLI globally with `npm install -g @nikolauska/linear-axi` (Node.js 24 or newer).
 
 ## When to use
 
-Use linear-axi whenever a task touches Linear: listing, viewing, creating, or updating issues; browsing or editing projects and documents; creating or listing comments; checking teams, users, labels, cycles, milestones, or statuses; or binding the current repo to a default Linear project.
+Use linear-axi whenever a task touches Linear: issues, projects, documents, comments, milestones, cycles, statuses, labels, teams, users, or binding the current repo to a default Linear project.
 
-## Workflow
+## How to use
 
-1. Run `linear-axi` with no arguments for a dashboard of the current repo. Uninitialized repos show setup hints instead of workspace-wide issue counts.
-2. List Linear projects with `linear-axi projects list`, then bind a repository with `linear-axi init --project "<project>"`; this accepts a project id, name, or slug, validates the project, and stores discovered workspace metadata in `.linear-project`.
-3. Drill in command-first: `issues list`, `issues view <id>`, `projects list`, `documents view <id>`, `comments list --issue <id>`, and so on.
-4. Add `--fields` for columns, `--cursor` for pagination, and `--full` only when complete content is needed.
-5. Linear operation responses include contextual next-step hints under `help:` when recovery or follow-up is useful - follow them.
-6. Before a destructive or broad mutation, verify the target and ask for confirmation unless the user already requested that exact change.
+The CLI documents itself; read its help instead of guessing flags:
+
+- `linear-axi` shows a dashboard for the current repo with the next useful commands.
+- `linear-axi --help` lists commands and global flags.
+- `linear-axi <command> --help` lists subcommands; `linear-axi <command> <subcommand> --help` lists every accepted flag and explains defaults such as the repo project binding.
+- Responses and errors include `help:` hints when there is a useful next step, such as authorizing, choosing a project, or continuing a paginated list; follow them.
 
 ## Commands
 
 ```
-commands[12]:
+commands[13]:
   (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels
 ```
 
-Installed copies also inherit the SDK built-in `update` command.
-Run `linear-axi update --check` to compare the installed version with npm, or `linear-axi update` to upgrade.
-
-Run `linear-axi --help` for global flags, `linear-axi <resource> --help` for grouped subcommands, or `linear-axi <resource> <action> --help` for focused flags.
-
-## Tips
+## Rules
 
 - Never print bearer-token environment variables or OAuth tokens.
-- Linear command output is TOON-encoded and token-efficient; pipe through grep/head only when a list is very long.
-- Default issue and project lists are grouped by status, show active work first, and keep ids last. Use `--fields` when you need a custom column order.
-- Mutations validate targets and report compact results. After a transport or response failure, inspect the target before retrying to avoid duplicate changes.
-- For multi-line markdown descriptions, comments, or documents, write the text to a UTF-8 file and pass `--description-file <path>`, `--body-file <path>`, or `--content-file <path>`.
-- Repository project defaults are validated before an issue, document, or milestone command uses them unless `--project <project>` overrides them. Use `--all-projects` on issue and document list commands only when a workspace-wide list is intended.
+- Before a destructive or broad mutation, verify the target and ask for confirmation unless the user already requested that exact change.

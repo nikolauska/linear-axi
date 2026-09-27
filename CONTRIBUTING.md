@@ -29,13 +29,3 @@ The committed `skills/linear-axi/SKILL.md` is generated from `src/skill.ts`. Do 
 ```sh
 npm run build:skill
 ```
-
-## Regenerate the demo
-
-The demo requires VHS, zsh, and access to an authenticated Linear workspace. It creates temporary Linear projects, issues, and comments, so only run it when those external changes are intended:
-
-```sh
-npm run demo
-```
-
-The command builds the project and renders `docs/demo.webm` from `docs/demo.tape` using the local executable.

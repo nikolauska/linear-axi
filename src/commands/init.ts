@@ -2,7 +2,6 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseFlags, usage } from "../args.ts";
 import { collapseHome } from "../config.ts";
-import { renderToon } from "../format.ts";
 import { formatCommandArg } from "../lib/cli-helpers.ts";
 import {
   findGitRoot,
@@ -14,8 +13,10 @@ import { initHelp } from "./help.ts";
 
 export async function initCommand(args, runtime) {
   const parsed = parseFlags(args, {
-    boolean: ["help", "force"],
-    example: 'init --project "Roadmap"',
+    command: "init",
+    value: ["project"],
+    boolean: ["force"],
+    positionals: 1,
   });
   if (parsed.help) return initHelp();
   const project = String(parsed.project ?? parsed.positionals[0] ?? "").trim();
@@ -42,17 +43,17 @@ export async function initCommand(args, runtime) {
     const validated = await validateRepoProject(parsed.force ? { project } : existing, runtime);
     if (validated.workspace && existing.workspace !== validated.workspace) {
       await writeProjectFile(path, validated);
-      return renderToon({
+      return {
         project: "initialized",
         file: collapseHome(path),
         value: projectFileValue(validated),
-      });
+      };
     }
-    return renderToon({
+    return {
       project: "already initialized",
       file: collapseHome(path),
       value: projectFileValue(existing),
-    });
+    };
   }
   if (existing && !parsed.force) {
     throw usage(".linear-project already exists with a different project", [
@@ -63,11 +64,11 @@ export async function initCommand(args, runtime) {
 
   const validated = await validateRepoProject({ project }, runtime);
   await writeProjectFile(path, validated);
-  return renderToon({
+  return {
     project: "initialized",
     file: collapseHome(path),
     value: projectFileValue(validated),
-  });
+  };
 }
 
 async function writeProjectFile(path, repoProject) {

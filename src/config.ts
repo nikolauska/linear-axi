@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const DEFAULT_MCP_URL = "https://mcp.linear.app/mcp";
+export const DEFAULT_MCP_URL = "https://mcp.linear.app/mcp";
 
 export async function resolveMcpUrl(env) {
   if (env.LINEAR_AXI_MCP_URL) {
