@@ -1,6 +1,6 @@
 {
   "name": "@nikolauska/linear-axi",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "AXI wrapper for the Linear MCP server",
   "keywords": [
     "agent",
