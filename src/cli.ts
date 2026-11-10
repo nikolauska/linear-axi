@@ -8,6 +8,7 @@ import { authCommand } from "./commands/auth.ts";
 import { commentCommand } from "./commands/comments.ts";
 import { cycleCommand } from "./commands/cycles.ts";
 import { documentCommand } from "./commands/documents.ts";
+import { fileCommand } from "./commands/files.ts";
 import { topHelp } from "./commands/help.ts";
 import { homeCommand } from "./commands/home.ts";
 import { initCommand } from "./commands/init.ts";
@@ -37,6 +38,8 @@ const COMMANDS = {
   status: statusCommand,
   documents: documentCommand,
   document: documentCommand,
+  files: fileCommand,
+  file: fileCommand,
   projects: projectCommand,
   project: projectCommand,
   teams: (args, runtime) => listResourceCommand("teams", args, runtime),
@@ -91,6 +94,7 @@ export async function makeRuntime(context: MainContext): Promise<Runtime> {
     mcpUrl: url,
     stdout: context.stdout,
     stderr: context.stderr,
+    fetch: context.fetch,
     client:
       context.client ??
       new LinearMcpClient({

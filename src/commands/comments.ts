@@ -13,6 +13,12 @@ import {
   compactComment,
   paginationInfo,
 } from "../lib/linear-format.ts";
+import {
+  appendUploadMarkdown,
+  readUploadFiles,
+  uploadFiles,
+  uploadSummary,
+} from "../lib/file-upload.ts";
 import { asArray, callToolData } from "../lib/mcp-tools.ts";
 import { commentCreateHelp, commentListHelp, groupHelp } from "./help.ts";
 import { DEFAULT_LIMIT, ensureIssueExists, runMutation } from "./shared.ts";
@@ -90,14 +96,23 @@ async function createCommentCommand(args, runtime) {
   const parsed = parseFlags(args, {
     command: "comments create",
     value: ["issue", "body", "body-file"],
+    array: ["attach"],
   });
   if (parsed.help) return commentCreateHelp();
   requireValue(parsed.issue, "comments create requires --issue", COMMENT_CREATE_HELP);
   const toolArgs = collectKnownArgs(parsed, ["body"]);
   toolArgs.issueId = parsed.issue;
   await applyTextFileFlag(toolArgs, parsed, { flag: "body-file", field: "body", cwd: runtime.cwd });
-  requireValue(toolArgs.body, "--body or --body-file is required", COMMENT_CREATE_HELP);
+  // A comment that is only a screenshot is a normal agent case, so --attach alone is enough.
+  requireValue(
+    toolArgs.body || parsed.attach,
+    "--body, --body-file, or --attach is required",
+    COMMENT_CREATE_HELP,
+  );
+  const files = await readUploadFiles(parsed.attach ?? [], runtime.cwd, parsed);
   await ensureIssueExists(toolArgs.issueId, runtime);
+  const uploads = await uploadFiles(runtime, files);
+  if (uploads.length > 0) toolArgs.body = appendUploadMarkdown(toolArgs.body, uploads);
   const issueArg = formatCommandArg(toolArgs.issueId);
   return runMutation(runtime, {
     tool: "save_comment",
@@ -107,6 +122,7 @@ async function createCommentCommand(args, runtime) {
       const { truncated, ...compact } = compactComment(comment, COMMENT_ECHO_PREVIEW);
       return {
         comment: compact,
+        ...(uploads.length > 0 ? { attachments: uploadSummary(uploads) } : {}),
         ...(truncated
           ? {
               help: [

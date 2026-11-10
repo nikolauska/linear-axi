@@ -24,8 +24,8 @@ test("skill markdown is installable and points agents at linear-axi", () => {
 test("skill command block is generated from top help", () => {
   assert.equal(
     extractCommandsBlock(),
-    `commands[13]:
-  (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels`,
+    `commands[14]:
+  (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels, files`,
   );
 });
 

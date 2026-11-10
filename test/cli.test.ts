@@ -1397,7 +1397,7 @@ test("comments create requires a body before checking the issue", async () => {
       }),
     ),
     2,
-    /--body or --body-file is required/,
+    /--body, --body-file, or --attach is required/,
   );
 
   assert.equal(called, false);

@@ -51,6 +51,8 @@ Commands are grouped by the Linear resource they affect. AI agents can:
 - list, view, create, and update milestones;
 - inspect cycles, teams, users, statuses, and labels.
 
+Agents can also upload screenshots and other files. `files upload` returns Linear-hosted Markdown to paste anywhere, and `--attach` on `comments create`, `issues create`, and `issues update` uploads files and adds that Markdown for them, so images render inline instead of being described in words.
+
 List commands support filtering, selected fields, pagination, and full-detail output where applicable.
 
 ## Read results and recover from errors

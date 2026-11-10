@@ -12,6 +12,7 @@ export const COMMAND_NAMES = [
   "cycles",
   "statuses",
   "labels",
+  "files",
 ];
 
 export function topHelp() {
@@ -29,6 +30,7 @@ examples:
   linear-axi documents view <id>
   linear-axi issues update --id LIN-123 --state Done
   linear-axi comments create --issue LIN-123 --body "Ready for review."
+  linear-axi comments create --issue LIN-123 --body "Bug screenshot" --attach shot.png
   linear-axi update --check
 env[5]:
   LINEAR_AXI_MCP_URL, LINEAR_AXI_MCP_TOKEN, LINEAR_MCP_TOKEN, LINEAR_AXI_AUTH_FILE, CODEX_CONFIG
@@ -69,7 +71,9 @@ export function groupHelp(name, subcommands) {
     comments: [
       "linear-axi comments list --issue LIN-123",
       'linear-axi comments create --issue LIN-123 --body "Ready for review."',
+      "linear-axi comments create --issue LIN-123 --attach shot.png",
     ],
+    files: ["linear-axi files upload shot.png", "linear-axi files upload before.png after.png"],
     auth: [
       "linear-axi auth login",
       "linear-axi auth login --manual",
@@ -110,14 +114,24 @@ examples:
 }
 
 export function commentCreateHelp() {
-  return `usage: linear-axi comments create --issue <id> (--body <text> | --body-file <path>)
+  return `usage: linear-axi comments create --issue <id> (--body <text> | --body-file <path> | --attach <path>)
 flags:
   --issue <id>  required
   --body <markdown>
   --body-file <path>  UTF-8 file; use instead of --body for multi-line text
-examples:
+${ATTACH_HELP}examples:
   linear-axi comments create --issue LIN-123 --body "Ready for review."
   linear-axi comments create --issue LIN-123 --body-file note.md
+  linear-axi comments create --issue LIN-123 --body "Dark mode is broken" --attach shot.png
+`;
+}
+
+export function fileUploadHelp() {
+  return `usage: linear-axi files upload <path>...
+description: Upload files to Linear and print their asset URLs and Markdown. Put the Markdown in any description or comment body; Linear only renders images hosted by Linear.
+examples:
+  linear-axi files upload shot.png
+  linear-axi files upload before.png after.png
 `;
 }
 
@@ -284,14 +298,18 @@ const ISSUE_FIELDS_HELP = `  --title <title>
   --description-file <path>  use instead of --description
 `;
 
+const ATTACH_HELP = `  --attach <path>  upload a file and add it as Markdown; images show inline; repeatable
+`;
+
 export function issueCreateHelp() {
   return `usage: linear-axi issues create --title <title> --team <team> [fields]
 description: Uses the repo default project unless --project is given. If an issue with the same title already exists for the team, it is returned with existing: true.
 flags:
-${ISSUE_FIELDS_HELP}  --label <label>  repeatable
+${ISSUE_FIELDS_HELP}${ATTACH_HELP}  --label <label>  repeatable
   --allow-duplicate  create a new issue even when one with the same title exists
 examples:
   linear-axi issues create --title "Fix auth" --team ENG
+  linear-axi issues create --title "Broken dark mode" --team ENG --attach shot.png
   linear-axi issues create --title "Task" --team ENG --project "Roadmap" --label Bug
 `;
 }
@@ -300,10 +318,12 @@ export function issueUpdateHelp() {
   return `usage: linear-axi issues update --id <id> [fields]
 flags:
   --id <id>  required
-${ISSUE_FIELDS_HELP}  --label <label>  add a label; repeatable
+${ISSUE_FIELDS_HELP}  --attach <path>  upload a file and append it to the description; repeatable
+  --label <label>  add a label; repeatable
   --remove-label <label>  remove a label; repeatable
 examples:
   linear-axi issues update --id LIN-123 --state Done
+  linear-axi issues update --id LIN-123 --attach after.png
   linear-axi issues update --id LIN-123 --label Bug --remove-label Triage
 `;
 }
@@ -339,8 +359,8 @@ const GROUP_FLAG_HELP = {
   issues: [
     "flags{list}:\n  --assignee <user>, --state <state>, --team <team>, --project <project>, --all-projects, --query <text>, --label <label>, --limit <n> (default 50), --fields <a,b,c>, --full",
     "flags{view}:\n  --full (show complete description without truncation)",
-    "flags{create}:\n  --title <text> (required), --team <team> (required), --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>, --priority <0-4>, --allow-duplicate",
-    "flags{update}:\n  --id <id> (required), --title <text>, --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>, --remove-label <label>, --priority <0-4>",
+    "flags{create}:\n  --title <text> (required), --team <team> (required), --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>, --priority <0-4>, --attach <path>, --allow-duplicate",
+    "flags{update}:\n  --id <id> (required), --title <text>, --description <markdown> or --description-file <path>, --state <state>, --assignee <user>, --project <project>, --label <label>, --remove-label <label>, --priority <0-4>, --attach <path>",
   ],
   projects: [
     "flags{list}:\n  --query <text>, --team <team>, --state <state>, --limit <n> (default 50), --fields <a,b,c>, --full",
@@ -355,6 +375,6 @@ const GROUP_FLAG_HELP = {
   ],
   comments: [
     "flags{list}:\n  --issue <id> (required), --limit <n> (default 50), --cursor <cursor>, --full",
-    "flags{create}:\n  --issue <id> (required), --body <text> or --body-file <path> (required)",
+    "flags{create}:\n  --issue <id> (required), --body <text> or --body-file <path>, --attach <path> (body or attach required)",
   ],
 };

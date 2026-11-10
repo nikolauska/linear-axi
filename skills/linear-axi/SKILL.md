@@ -1,6 +1,6 @@
 ---
 name: linear-axi
-description: "Operate Linear through the linear-axi CLI - issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels, auth, and repo project setup. Use whenever a task touches Linear: listing or creating issues, updating project work, reading documents, or managing comments. Do not use for non-Linear issue trackers."
+description: "Operate Linear through the linear-axi CLI - issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels, file uploads, auth, and repo project setup. Use whenever a task touches Linear: listing or creating issues, updating project work, reading documents, managing comments, or attaching screenshots and files. Do not use for non-Linear issue trackers."
 ---
 
 # linear-axi
@@ -25,8 +25,8 @@ The CLI documents itself; read its help instead of guessing flags:
 ## Commands
 
 ```
-commands[13]:
-  (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels
+commands[14]:
+  (none)=dashboard, init, auth, issues, projects, teams, users, comments, documents, milestones, cycles, statuses, labels, files
 ```
 
 ## Rules

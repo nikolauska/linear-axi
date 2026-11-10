@@ -43,6 +43,8 @@ export interface Runtime {
   stdout: Pick<Writable, "write">;
   stderr?: Pick<Writable, "write">;
   client: McpClientLike;
+  // File uploads PUT bytes to a signed storage URL outside MCP; injectable so tests stay offline.
+  fetch?: typeof fetch;
   mcpUrl: string;
   binPath?: string;
 }
@@ -53,4 +55,5 @@ export interface MainContext {
   stdout: Pick<Writable, "write">;
   stderr?: Pick<Writable, "write">;
   client?: McpClientLike;
+  fetch?: typeof fetch;
 }
